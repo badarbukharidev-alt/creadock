@@ -182,6 +182,14 @@ export const products = mysqlTable("products", {
   compareAtPrice: decimal("compareAtPrice", { precision: 10, scale: 2 }),
   currency: varchar("currency", { length: 3 }).default("USD").notNull(),
   thumbnailUrl: varchar("thumbnailUrl", { length: 1024 }),
+  heroAssetId: int("heroAssetId").references(() => mediaAssets.id, { onDelete: "set null" }),
+  shortDescription: varchar("shortDescription", { length: 420 }),
+  benefits: json("benefits").$type<string[]>(),
+  productPageSettings: json("productPageSettings").$type<{ ctaLabel?: string; layout?: "standard" | "editorial" | "minimal"; seoTitle?: string; seoDescription?: string; checkoutMessage?: string; collectPhone?: boolean; collectAddress?: boolean }>(),
+  visibility: mysqlEnum("visibility", ["public", "unlisted", "private"]).default("public").notNull(),
+  fulfillmentType: mysqlEnum("fulfillmentType", ["digital", "redirect", "manual", "none"]).default("digital").notNull(),
+  inventoryLimit: int("inventoryLimit"),
+  inventorySold: int("inventorySold").default(0).notNull(),
   fileKey: varchar("fileKey", { length: 1024 }),
   fileUrl: varchar("fileUrl", { length: 1024 }),
   fileSizeBytes: int("fileSizeBytes", { unsigned: true }).default(0).notNull(),
@@ -192,6 +200,54 @@ export const products = mysqlTable("products", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => [uniqueIndex("products_creator_slug_idx").on(table.creatorId, table.slug), index("products_creator_status_idx").on(table.creatorId, table.status)]);
+
+export const productVariants = mysqlTable("productVariants", {
+  id: int("id").autoincrement().primaryKey(),
+  productId: int("productId").notNull().references(() => products.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 160 }).notNull(),
+  priceDelta: decimal("priceDelta", { precision: 10, scale: 2 }).default("0.00").notNull(),
+  inventoryLimit: int("inventoryLimit"),
+  inventorySold: int("inventorySold").default(0).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("product_variants_product_idx").on(table.productId, table.sortOrder)]);
+
+export const coupons = mysqlTable("coupons", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  code: varchar("code", { length: 64 }).notNull(),
+  type: mysqlEnum("type", ["percent", "fixed"]).notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  minimumAmount: decimal("minimumAmount", { precision: 10, scale: 2 }),
+  maxRedemptions: int("maxRedemptions"),
+  redemptions: int("redemptions").default(0).notNull(),
+  startsAt: timestamp("startsAt"),
+  expiresAt: timestamp("expiresAt"),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [uniqueIndex("coupons_creator_code_idx").on(table.creatorId, table.code), index("coupons_creator_active_idx").on(table.creatorId, table.isActive)]);
+
+export const productBundles = mysqlTable("productBundles", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull(),
+  description: text("description"),
+  price: decimal("price", { precision: 10, scale: 2 }).default("0.00").notNull(),
+  compareAtPrice: decimal("compareAtPrice", { precision: 10, scale: 2 }),
+  status: mysqlEnum("status", ["draft", "published", "archived"]).default("draft").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [uniqueIndex("product_bundles_creator_slug_idx").on(table.creatorId, table.slug), index("product_bundles_creator_status_idx").on(table.creatorId, table.status)]);
+
+export const bundleItems = mysqlTable("bundleItems", {
+  id: int("id").autoincrement().primaryKey(),
+  bundleId: int("bundleId").notNull().references(() => productBundles.id, { onDelete: "cascade" }),
+  productId: int("productId").notNull().references(() => products.id, { onDelete: "cascade" }),
+  sortOrder: int("sortOrder").default(0).notNull(),
+}, (table) => [uniqueIndex("bundle_items_bundle_product_idx").on(table.bundleId, table.productId), index("bundle_items_bundle_idx").on(table.bundleId, table.sortOrder)]);
 
 /** Singleton, non-secret platform controls. Provider credentials remain environment-only. */
 export const platformSettings = mysqlTable("platformSettings", {

@@ -7,8 +7,10 @@ import { mergeCompletedLesson, mvpActiveMembership, mvpCampaignSent, mvpConfirme
 import {
   auditLogs,
   appointments,
+  bundleItems,
   availabilitySlots,
   courses,
+  coupons,
   creators,
   customers,
   digitalEntitlements,
@@ -28,6 +30,8 @@ import {
   paymentEvents,
   platformSettings,
   products,
+  productBundles,
+  productVariants,
   creatorLinks,
   creatorPages,
   services,
@@ -77,6 +81,13 @@ const productInput = z.object({
   id: z.number().int().optional(),
   name: z.string().min(2).max(255),
   description: z.string().max(8000).optional(),
+  shortDescription: z.string().max(420).optional(),
+  benefits: z.array(z.string().min(1).max(220)).max(20).optional(),
+  heroAssetId: z.number().int().nullable().optional(),
+  visibility: z.enum(["public", "unlisted", "private"]).default("public"),
+  fulfillmentType: z.enum(["digital", "redirect", "manual", "none"]).default("digital"),
+  inventoryLimit: z.number().int().min(1).max(1_000_000).nullable().optional(),
+  productPageSettings: z.object({ ctaLabel: z.string().max(80).optional(), layout: z.enum(["standard", "editorial", "minimal"]).optional(), seoTitle: z.string().max(180).optional(), seoDescription: z.string().max(320).optional(), checkoutMessage: z.string().max(500).optional(), collectPhone: z.boolean().optional(), collectAddress: z.boolean().optional() }).optional(),
   type: z.enum(["digital", "course", "service", "membership", "external"]),
   price: z.string().regex(/^\d+(\.\d{1,2})?$/),
   status: z.enum(["draft", "published", "archived"]),
@@ -232,7 +243,8 @@ export const appRouter = router({
     }),
     save: protectedProcedure.input(productInput).mutation(async ({ ctx, input }) => {
       const db = await requireDb(); const creator = await ownedCreator(ctx);
-      const payload = { ...input, slug: makeProductSlug(input.name), fileUrl: input.fileUrl || null, fileKey: input.fileUrl?.startsWith("/manus-storage/") ? input.fileUrl.replace("/manus-storage/", "") : null, fileSizeBytes: input.fileSizeBytes ?? 0, externalUrl: input.externalUrl || null };
+      if (input.heroAssetId) await requireOwnedAsset(db, creator.id, input.heroAssetId);
+      const payload = { ...input, slug: makeProductSlug(input.name), fileUrl: input.fileUrl || null, fileKey: input.fileUrl?.startsWith("/manus-storage/") ? input.fileUrl.replace("/manus-storage/", "") : null, fileSizeBytes: input.fileSizeBytes ?? 0, externalUrl: input.externalUrl || null, heroAssetId: input.heroAssetId ?? null, shortDescription: input.shortDescription || null, benefits: input.benefits ?? null, inventoryLimit: input.inventoryLimit ?? null, productPageSettings: input.productPageSettings ?? null };
       if (input.id) {
         await db.update(products).set(payload).where(and(eq(products.id, input.id), eq(products.creatorId, creator.id)));
         return input.id;
@@ -240,6 +252,17 @@ export const appRouter = router({
       const inserted = await db.insert(products).values({ ...payload, creatorId: creator.id });
       return Number(inserted[0].insertId);
     }),
+    detail: protectedProcedure.input(z.object({ id: z.number().int() })).query(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); const product = (await db.select().from(products).where(and(eq(products.id, input.id), eq(products.creatorId, creator.id))).limit(1))[0]; if (!product) throw new TRPCError({ code: "NOT_FOUND" }); return { product, variants: await db.select().from(productVariants).where(eq(productVariants.productId, product.id)).orderBy(productVariants.sortOrder) }; }),
+    saveVariant: protectedProcedure.input(z.object({ id: z.number().int().optional(), productId: z.number().int(), name: z.string().min(1).max(160), priceDelta: z.string().regex(/^-?\d+(\.\d{1,2})?$/), inventoryLimit: z.number().int().min(1).max(1_000_000).nullable().optional() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); const product = (await db.select().from(products).where(and(eq(products.id, input.productId), eq(products.creatorId, creator.id))).limit(1))[0]; if (!product) throw new TRPCError({ code: "NOT_FOUND" }); if (input.id) { await db.update(productVariants).set({ name: input.name, priceDelta: input.priceDelta, inventoryLimit: input.inventoryLimit ?? null }).where(and(eq(productVariants.id, input.id), eq(productVariants.productId, product.id))); return input.id; } const count = (await db.select({ id: productVariants.id }).from(productVariants).where(eq(productVariants.productId, product.id))).length; const result = await db.insert(productVariants).values({ productId: product.id, name: input.name, priceDelta: input.priceDelta, inventoryLimit: input.inventoryLimit ?? null, sortOrder: count }); return Number(result[0].insertId); }),
+    removeVariant: protectedProcedure.input(z.object({ id: z.number().int(), productId: z.number().int() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); const product = (await db.select().from(products).where(and(eq(products.id, input.productId), eq(products.creatorId, creator.id))).limit(1))[0]; if (!product) throw new TRPCError({ code: "NOT_FOUND" }); await db.delete(productVariants).where(and(eq(productVariants.id, input.id), eq(productVariants.productId, product.id))); return { success: true }; }),
+  }),
+  commerce: router({
+    coupons: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); return db.select().from(coupons).where(eq(coupons.creatorId, creator.id)).orderBy(desc(coupons.createdAt)); }),
+    saveCoupon: protectedProcedure.input(z.object({ id: z.number().int().optional(), code: z.string().trim().min(3).max(64), type: z.enum(["percent", "fixed"]), amount: z.string().regex(/^\d+(\.\d{1,2})?$/), minimumAmount: z.string().regex(/^\d+(\.\d{1,2})?$/).nullable().optional(), maxRedemptions: z.number().int().min(1).max(1_000_000).nullable().optional(), expiresAt: z.date().nullable().optional(), isActive: z.boolean() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); const payload = { ...input, code: input.code.toUpperCase(), minimumAmount: input.minimumAmount ?? null, maxRedemptions: input.maxRedemptions ?? null, expiresAt: input.expiresAt ?? null }; if (input.id) { await db.update(coupons).set(payload).where(and(eq(coupons.id, input.id), eq(coupons.creatorId, creator.id))); return input.id; } const result = await db.insert(coupons).values({ ...payload, creatorId: creator.id }); return Number(result[0].insertId); }),
+    removeCoupon: protectedProcedure.input(z.object({ id: z.number().int() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); await db.delete(coupons).where(and(eq(coupons.id, input.id), eq(coupons.creatorId, creator.id))); return { success: true }; }),
+    bundles: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); const rows = await db.select().from(productBundles).where(eq(productBundles.creatorId, creator.id)).orderBy(desc(productBundles.createdAt)); return Promise.all(rows.map(async (bundle) => ({ bundle, items: await db.select().from(bundleItems).innerJoin(products, eq(bundleItems.productId, products.id)).where(eq(bundleItems.bundleId, bundle.id)).orderBy(bundleItems.sortOrder) }))); }),
+    saveBundle: protectedProcedure.input(z.object({ id: z.number().int().optional(), name: z.string().min(2).max(255), description: z.string().max(8000).optional(), price: z.string().regex(/^\d+(\.\d{1,2})?$/), compareAtPrice: z.string().regex(/^\d+(\.\d{1,2})?$/).nullable().optional(), status: z.enum(["draft", "published", "archived"]), productIds: z.array(z.number().int()).min(2).max(50) })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); const owned = await db.select().from(products).where(eq(products.creatorId, creator.id)); const ownedIds = new Set(owned.map((product) => product.id)); if (input.productIds.some((id) => !ownedIds.has(id))) throw new TRPCError({ code: "NOT_FOUND", message: "A bundle product was not found." }); const payload = { name: input.name, slug: makeProductSlug(input.name), description: input.description || null, price: input.price, compareAtPrice: input.compareAtPrice ?? null, status: input.status }; let bundleId = input.id; if (bundleId) await db.update(productBundles).set(payload).where(and(eq(productBundles.id, bundleId), eq(productBundles.creatorId, creator.id))); else { const result = await db.insert(productBundles).values({ ...payload, creatorId: creator.id }); bundleId = Number(result[0].insertId); } await db.delete(bundleItems).where(eq(bundleItems.bundleId, bundleId)); await db.insert(bundleItems).values(input.productIds.map((productId, sortOrder) => ({ bundleId: bundleId!, productId, sortOrder }))); return bundleId; }),
+    removeBundle: protectedProcedure.input(z.object({ id: z.number().int() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); await db.delete(productBundles).where(and(eq(productBundles.id, input.id), eq(productBundles.creatorId, creator.id))); return { success: true }; }),
   }),
   courses: router({
     list: protectedProcedure.query(async ({ ctx }) => {
@@ -320,7 +343,7 @@ export const appRouter = router({
       const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator) throw new TRPCError({ code: "NOT_FOUND" });
       await db.insert(storeVisits).values({ creatorId: creator.id });
       const [catalog, memberships, bookingServices, blocks, courseCatalog] = await Promise.all([
-        db.select().from(products).where(and(eq(products.creatorId, creator.id), eq(products.status, "published"))),
+        db.select().from(products).where(and(eq(products.creatorId, creator.id), eq(products.status, "published"), eq(products.visibility, "public"))),
         db.select().from(membershipPlans).where(and(eq(membershipPlans.creatorId, creator.id), eq(membershipPlans.status, "published"))),
         db.select().from(services).where(and(eq(services.creatorId, creator.id), eq(services.status, "published"))),
         db.select().from(storefrontBlocks).where(and(eq(storefrontBlocks.creatorId, creator.id), eq(storefrontBlocks.isVisible, true))).orderBy(storefrontBlocks.sortOrder),
@@ -340,6 +363,8 @@ export const appRouter = router({
       ]);
       return { creator, page, blocks, links: links.filter((link) => !link.expiresAt || link.expiresAt > now) };
     }),
+    productDetail: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), slug: z.string().min(1).max(255) })).query(async ({ input }) => { const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator || !creator.isPublished) throw new TRPCError({ code: "NOT_FOUND" }); const product = (await db.select().from(products).where(and(eq(products.creatorId, creator.id), eq(products.slug, input.slug), eq(products.status, "published"))).limit(1))[0]; if (!product || product.visibility === "private") throw new TRPCError({ code: "NOT_FOUND" }); return { creator, product, variants: await db.select().from(productVariants).where(eq(productVariants.productId, product.id)).orderBy(productVariants.sortOrder) }; }),
+    bundleDetail: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), slug: z.string().min(1).max(255) })).query(async ({ input }) => { const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator || !creator.isPublished) throw new TRPCError({ code: "NOT_FOUND" }); const bundle = (await db.select().from(productBundles).where(and(eq(productBundles.creatorId, creator.id), eq(productBundles.slug, input.slug), eq(productBundles.status, "published"))).limit(1))[0]; if (!bundle) throw new TRPCError({ code: "NOT_FOUND" }); const items = await db.select().from(bundleItems).innerJoin(products, eq(bundleItems.productId, products.id)).where(eq(bundleItems.bundleId, bundle.id)).orderBy(bundleItems.sortOrder); return { creator, bundle, items: items.filter((entry) => entry.products.status === "published" && entry.products.visibility !== "private") }; }),
     registerLinkClick: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), linkId: z.number().int() })).mutation(async ({ input }) => {
       const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator || !creator.isPublished) throw new TRPCError({ code: "NOT_FOUND" });
       const link = (await db.select().from(creatorLinks).where(and(eq(creatorLinks.id, input.linkId), eq(creatorLinks.creatorId, creator.id), eq(creatorLinks.isVisible, true))).limit(1))[0];
@@ -354,19 +379,21 @@ export const appRouter = router({
       await getOrCreateCustomer(db, creator.id, input.email, input.name, true, ctx.user?.normalizedEmail === input.email.trim().toLowerCase() ? ctx.user.id : undefined);
       return { success: true };
     }),
-    purchase: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), email: z.string().email(), name: z.string().max(255).optional(), productId: z.number().int().optional(), membershipPlanId: z.number().int().optional() }).refine((input) => Boolean(input.productId) !== Boolean(input.membershipPlanId), "Select one offer to purchase")).mutation(async ({ input, ctx }) => {
+    purchase: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), email: z.string().email(), name: z.string().max(255).optional(), couponCode: z.string().trim().min(3).max(64).optional(), productId: z.number().int().optional(), membershipPlanId: z.number().int().optional() }).refine((input) => Boolean(input.productId) !== Boolean(input.membershipPlanId), "Select one offer to purchase")).mutation(async ({ input, ctx }) => {
       const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator) throw new TRPCError({ code: "NOT_FOUND" });
       if (!stripeProvider.isConfigured()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Payments are not configured yet. Add Stripe keys in the platform settings." });
       const customer = await getOrCreateCustomer(db, creator.id, input.email, input.name, false, ctx.user?.normalizedEmail === input.email.trim().toLowerCase() ? ctx.user.id : undefined);
       const host = ctx.req.headers.host || "localhost";
       const origin = ctx.req.headers.origin || `${ctx.req.protocol === "https" ? "https" : "http"}://${host}`;
       if (input.productId) {
-        const product = (await db.select().from(products).where(and(eq(products.id, input.productId), eq(products.creatorId, creator.id), eq(products.status, "published"))).limit(1))[0];
+        const product = (await db.select().from(products).where(and(eq(products.id, input.productId), eq(products.creatorId, creator.id), eq(products.status, "published"), eq(products.visibility, "public"))).limit(1))[0];
         if (!product) throw new TRPCError({ code: "NOT_FOUND", message: "Offer is unavailable" });
-        const orderResult = await db.insert(orders).values({ creatorId: creator.id, customerId: customer.id, orderNumber: mvpOrderNumber(), status: "pending", total: product.price, currency: product.currency });
+        let total = Number(product.price); let appliedCoupon: string | undefined;
+        if (input.couponCode) { const coupon = (await db.select().from(coupons).where(and(eq(coupons.creatorId, creator.id), eq(coupons.code, input.couponCode.toUpperCase()), eq(coupons.isActive, true))).limit(1))[0]; const now = new Date(); if (!coupon || (coupon.startsAt && coupon.startsAt > now) || (coupon.expiresAt && coupon.expiresAt <= now) || (coupon.maxRedemptions !== null && coupon.redemptions >= coupon.maxRedemptions) || (coupon.minimumAmount !== null && total < Number(coupon.minimumAmount))) throw new TRPCError({ code: "BAD_REQUEST", message: "This coupon is unavailable." }); total = coupon.type === "percent" ? total * Math.max(0, 1 - Number(coupon.amount) / 100) : Math.max(0, total - Number(coupon.amount)); total = Math.round(total * 100) / 100; appliedCoupon = coupon.code; await db.update(coupons).set({ redemptions: coupon.redemptions + 1 }).where(eq(coupons.id, coupon.id)); }
+        const orderResult = await db.insert(orders).values({ creatorId: creator.id, customerId: customer.id, orderNumber: mvpOrderNumber(), status: "pending", total: total.toFixed(2), currency: product.currency });
         const orderId = Number(orderResult[0].insertId);
         await db.insert(orderItems).values({ orderId, productId: product.id, title: product.name, unitPrice: product.price });
-        const checkout = await stripeProvider.createCheckout({ orderId, customerEmail: customer.email, title: product.name, amount: String(product.price), currency: product.currency, mode: "payment", successUrl: `${origin}/c/${input.handle}?checkout=success&session_id={CHECKOUT_SESSION_ID}`, cancelUrl: `${origin}/c/${input.handle}?checkout=cancelled`, metadata: { creatorId: String(creator.id), customerId: String(customer.id), productId: String(product.id) } });
+        const checkout = await stripeProvider.createCheckout({ orderId, customerEmail: customer.email, title: product.name, amount: total.toFixed(2), currency: product.currency, mode: "payment", successUrl: `${origin}/c/${input.handle}?checkout=success&session_id={CHECKOUT_SESSION_ID}`, cancelUrl: `${origin}/c/${input.handle}?checkout=cancelled`, metadata: { creatorId: String(creator.id), customerId: String(customer.id), productId: String(product.id), ...(appliedCoupon ? { couponCode: appliedCoupon } : {}) } });
         await db.update(orders).set({ stripeCheckoutSessionId: checkout.id }).where(eq(orders.id, orderId));
         return { kind: "product" as const, orderId, checkoutUrl: checkout.url, productName: product.name };
       }

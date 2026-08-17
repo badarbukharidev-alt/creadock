@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
-import { creatorLinks, creatorPages, creators, mediaAssets, mediaFolders, pageBlocks, storefrontBlocks } from "../drizzle/schema";
+import { bundleItems, coupons, creatorLinks, creatorPages, creators, mediaAssets, mediaFolders, pageBlocks, productBundles, productVariants, products, storefrontBlocks } from "../drizzle/schema";
 
 const state = vi.hoisted(() => ({
   rows: new Map<unknown, Array<Record<string, unknown>>>(),
@@ -105,5 +105,18 @@ describe("CreaDock creator content workflows", () => {
     await caller.storefrontBuilder.saveBlock({ type: "heading", title: "A better beginning", content: { text: "A better beginning" }, isVisible: true });
     await caller.storefrontBuilder.reorderBlocks({ blockIds: [1] });
     expect(state.updates.some((entry) => entry.table === storefrontBlocks)).toBe(true);
+  });
+
+  it("persists creator-owned product variants, coupons, and bundles", async () => {
+    state.rows.set(products, [{ id: 20, creatorId: 1, name: "Guide", status: "published", price: "20.00" }, { id: 21, creatorId: 1, name: "Templates", status: "published", price: "30.00" }]);
+    state.rows.set(productVariants, []); state.rows.set(coupons, []); state.rows.set(productBundles, []); state.rows.set(bundleItems, []);
+    const caller = appRouter.createCaller(creatorContext());
+    await caller.products.saveVariant({ productId: 20, name: "Personal license", priceDelta: "5.00" });
+    await caller.commerce.saveCoupon({ code: "launch20", type: "percent", amount: "20", isActive: true });
+    await caller.commerce.saveBundle({ name: "Launch bundle", price: "35.00", status: "draft", productIds: [20, 21] });
+    expect(state.inserts.some((entry) => entry.table === productVariants && (entry.values as { productId: number }).productId === 20)).toBe(true);
+    expect(state.inserts.some((entry) => entry.table === coupons && (entry.values as { code: string }).code === "LAUNCH20")).toBe(true);
+    expect(state.inserts.some((entry) => entry.table === productBundles && (entry.values as { creatorId: number }).creatorId === 1)).toBe(true);
+    expect(state.inserts.some((entry) => entry.table === bundleItems)).toBe(true);
   });
 });

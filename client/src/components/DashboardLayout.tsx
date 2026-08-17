@@ -35,6 +35,7 @@ import {
   Mail,
   Package,
   Settings2,
+  SlidersHorizontal,
   Store,
   Users,
   WandSparkles,
@@ -60,6 +61,8 @@ const groups: Array<{ label?: string; items: NavItem[] }> = [
     label: "Sell",
     items: [
       { label: "Products", path: "/app/products", icon: Package },
+      { label: "Product setup", path: "/app/product-settings", icon: SlidersHorizontal },
+      { label: "Commerce", path: "/app/commerce", icon: CreditCard },
       { label: "Courses", path: "/app/courses", icon: BookOpen },
       { label: "Bookings", path: "/app/bookings", icon: CalendarDays },
       { label: "Memberships", path: "/app/memberships", icon: CreditCard },

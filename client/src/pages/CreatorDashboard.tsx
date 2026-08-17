@@ -14,6 +14,8 @@ import { useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { LinksWorkspace, MediaLibrary, PagesWorkspace } from "./CreatorContentStudio";
 import StorefrontBuilder from "./StorefrontBuilder";
+import CommerceStudio from "./CommerceStudio";
+import ProductConfiguration from "./ProductConfiguration";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const dateText = (value: Date | string) => new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -115,7 +117,7 @@ function WorkspaceContent({ section }: { section: string }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="min-h-screen bg-[#f7f7f3]" />;
   if (!user) return null;
-  return { dashboard: <Overview />, products: <Products />, courses: <Courses />, bookings: <Bookings />, memberships: <Memberships />, customers: <Customers />, email: <Email />, store: <StorefrontBuilder />, appearance: <StorefrontBuilder />, pages: <PagesWorkspace />, links: <LinksWorkspace />, media: <MediaLibrary />, analytics: <Analytics />, checkout: <Checkout />, settings: <StoreSettings />, help: <Help /> }[section] || <Overview />;
+  return { dashboard: <Overview />, products: <Products />, "product-settings": <ProductConfiguration />, commerce: <CommerceStudio />, courses: <Courses />, bookings: <Bookings />, memberships: <Memberships />, customers: <Customers />, email: <Email />, store: <StorefrontBuilder />, appearance: <StorefrontBuilder />, pages: <PagesWorkspace />, links: <LinksWorkspace />, media: <MediaLibrary />, analytics: <Analytics />, checkout: <Checkout />, settings: <StoreSettings />, help: <Help /> }[section] || <Overview />;
 }
 
 export default function CreatorDashboard() {

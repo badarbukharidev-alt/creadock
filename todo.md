@@ -94,3 +94,10 @@
 - [x] Wire live `/c/:handle` public rendering to persisted visual settings and storefront-builder blocks.
 - [x] Add client regression coverage for builder theme, preview mode, and public builder-block rendering.
 - [x] Add client regression coverage proving persisted visual-theme colors are applied to the live public storefront.
+- [x] Add richer product-page, fulfillment, visibility, inventory, and checkout configuration data models.
+- [x] Build product catalog and editor support for product pages, coupons, bundles, and product-level checkout settings.
+- [x] Add public product detail, coupon validation, bundle pricing, and protected commerce regression coverage.
+- [x] Extend the creator product editor with product-page, visibility, fulfillment, inventory, checkout, and variant controls.
+- [ ] Add public bundle pricing and purchase presentation for published creator bundles.
+- [ ] Add coupon checkout validation regressions for availability, expiry, minimum amount, limits, and discounted totals.
+- [ ] Complete product-setup controls for variant inventory and remaining product-page checkout settings, then add focused creator workflow coverage.
