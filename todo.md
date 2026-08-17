@@ -68,8 +68,8 @@
 - [x] Extend reports with MRR, storage, payment, and explicit growth metrics under date filtering.
 - [x] Add browser-level login-required and staff-only route verification beyond screenshots through protected route rendering and access-guard assertions.
 - [x] Add webhook regression tests for checkout completion, refund reversal, and recurring subscription updates and deletions.
-- [ ] Add actionable administrator file and platform-setting management controls beyond read-only readiness and inventory views.
-- [ ] Add true storage-usage and explicitly labeled growth KPIs to the date-filtered platform reports.
-- [ ] Add automated browser workflow checks for unauthenticated customer routes and non-staff administrator routes.
+- [x] Add actionable administrator file and platform-setting management controls beyond read-only readiness and inventory views.
+- [x] Add true storage-usage and explicitly labeled growth KPIs to the date-filtered platform reports.
+- [x] Add automated browser workflow checks for unauthenticated customer routes and non-staff administrator routes.
 - [x] Add handler-level Stripe webhook tests for checkout completion, refunds, and subscription update/deletion events.
 - [x] Remove all legacy Manus OAuth route, redirect, and client-login references from the deployed CreaDock authentication flow.

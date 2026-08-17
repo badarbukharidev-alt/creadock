@@ -106,6 +106,7 @@ export const products = mysqlTable("products", {
   thumbnailUrl: varchar("thumbnailUrl", { length: 1024 }),
   fileKey: varchar("fileKey", { length: 1024 }),
   fileUrl: varchar("fileUrl", { length: 1024 }),
+  fileSizeBytes: int("fileSizeBytes", { unsigned: true }).default(0).notNull(),
   externalUrl: varchar("externalUrl", { length: 1024 }),
   status: mysqlEnum("status", ["draft", "published", "archived"]).default("draft").notNull(),
   stripeProductId: varchar("stripeProductId", { length: 255 }),
@@ -113,6 +114,16 @@ export const products = mysqlTable("products", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => [uniqueIndex("products_creator_slug_idx").on(table.creatorId, table.slug), index("products_creator_status_idx").on(table.creatorId, table.status)]);
+
+/** Singleton, non-secret platform controls. Provider credentials remain environment-only. */
+export const platformSettings = mysqlTable("platformSettings", {
+  id: int("id").primaryKey(),
+  platformName: varchar("platformName", { length: 120 }).default("CreaDock").notNull(),
+  supportEmail: varchar("supportEmail", { length: 320 }),
+  allowPublicSignups: boolean("allowPublicSignups").default(true).notNull(),
+  updatedByUserId: int("updatedByUserId").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
 
 export const courses = mysqlTable("courses", {
   id: int("id").autoincrement().primaryKey(),

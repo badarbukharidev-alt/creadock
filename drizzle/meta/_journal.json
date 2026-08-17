@@ -57,6 +57,13 @@
       "when": 1786988202403,
       "tag": "0007_fancy_leech",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1786991175806,
+      "tag": "0008_thankful_absorbing_man",
+      "breakpoints": true
     }
   ]
 }

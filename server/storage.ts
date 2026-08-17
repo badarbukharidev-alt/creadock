@@ -95,3 +95,13 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const { url } = (await resp.json()) as { url: string };
   return url;
 }
+
+/** Returns the authoritative byte length reported by the object store. */
+export async function storageGetObjectSize(relKey: string): Promise<number> {
+  const url = await storageGetSignedUrl(relKey);
+  const response = await fetch(url, { method: "HEAD" });
+  if (!response.ok) throw new Error(`Storage object lookup failed (${response.status})`);
+  const contentLength = Number(response.headers.get("content-length"));
+  if (!Number.isFinite(contentLength) || contentLength < 0) throw new Error("Storage object did not provide a byte length");
+  return Math.floor(contentLength);
+}

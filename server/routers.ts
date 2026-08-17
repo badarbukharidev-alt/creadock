@@ -23,6 +23,7 @@ import {
   orders,
   orderItems,
   paymentEvents,
+  platformSettings,
   products,
   services,
   storeVisits,
@@ -38,7 +39,7 @@ import { emailTemplates, sendEmail } from "./email";
 import { stripeProvider } from "./payments";
 import { smtpStatus } from "./email";
 import { stripeStatus } from "./payments";
-import { storageGetSignedUrl } from "./storage";
+import { storageGetObjectSize, storageGetSignedUrl } from "./storage";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 
@@ -75,6 +76,7 @@ const productInput = z.object({
   price: z.string().regex(/^\d+(\.\d{1,2})?$/),
   status: z.enum(["draft", "published", "archived"]),
   fileUrl: z.string().url().optional().or(z.literal("")),
+  fileSizeBytes: z.number().int().min(0).max(2_147_483_647).optional(),
   externalUrl: z.string().url().optional().or(z.literal("")),
 });
 
@@ -84,6 +86,9 @@ export const appRouter = router({
     me: publicProcedure.query((opts) => opts.ctx.user),
     signUp: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(160), email: z.string().email().max(320), username: z.string().min(3).max(32), password: z.string().min(12).max(128), confirmPassword: z.string().min(12).max(128) })).mutation(async ({ ctx, input }) => {
       if (input.password !== input.confirmPassword) throw new TRPCError({ code: "BAD_REQUEST", message: "Passwords do not match." });
+      const db = await requireDb();
+      const settings = (await db.select({ allowPublicSignups: platformSettings.allowPublicSignups }).from(platformSettings).where(eq(platformSettings.id, 1)).limit(1))[0];
+      if (settings && !settings.allowPublicSignups) throw new TRPCError({ code: "FORBIDDEN", message: "New account registration is temporarily unavailable." });
       const result = await signUp(input, ctx.req);
       if (!result.ok) throw new TRPCError({ code: result.code as "BAD_REQUEST" | "CONFLICT", message: result.message });
       await sendEmail({ to: input.email, ...emailTemplates.verification(input.name, result.verificationToken, ctx.req) }, { kind: "verification", userId: result.userId });
@@ -150,7 +155,7 @@ export const appRouter = router({
     }),
     save: protectedProcedure.input(productInput).mutation(async ({ ctx, input }) => {
       const db = await requireDb(); const creator = await ownedCreator(ctx);
-      const payload = { ...input, slug: makeProductSlug(input.name), fileUrl: input.fileUrl || null, fileKey: input.fileUrl?.startsWith("/manus-storage/") ? input.fileUrl.replace("/manus-storage/", "") : null, externalUrl: input.externalUrl || null };
+      const payload = { ...input, slug: makeProductSlug(input.name), fileUrl: input.fileUrl || null, fileKey: input.fileUrl?.startsWith("/manus-storage/") ? input.fileUrl.replace("/manus-storage/", "") : null, fileSizeBytes: input.fileSizeBytes ?? 0, externalUrl: input.externalUrl || null };
       if (input.id) {
         await db.update(products).set(payload).where(and(eq(products.id, input.id), eq(products.creatorId, creator.id)));
         return input.id;
@@ -289,11 +294,55 @@ export const appRouter = router({
   }),
   admin: router({
     overview: adminProcedure.query(() => getAdminSummary()),
-    configuration: adminProcedure.query(() => ({ stripe: stripeStatus(), smtp: smtpStatus() })),
+    configuration: adminProcedure.query(async () => {
+      const db = await requireDb();
+      const settings = (await db.select().from(platformSettings).where(eq(platformSettings.id, 1)).limit(1))[0];
+      return { stripe: stripeStatus(), smtp: smtpStatus(), settings: settings ?? { platformName: "CreaDock", supportEmail: null, allowPublicSignups: true } };
+    }),
+    updatePlatformSettings: adminProcedure.input(z.object({ platformName: z.string().trim().min(2).max(120), supportEmail: z.string().email().max(320).optional().or(z.literal("")), allowPublicSignups: z.boolean() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const payload = { platformName: input.platformName, supportEmail: input.supportEmail || null, allowPublicSignups: input.allowPublicSignups, updatedByUserId: ctx.user.id };
+      await db.insert(platformSettings).values({ id: 1, ...payload }).onDuplicateKeyUpdate({ set: payload });
+      await db.insert(auditLogs).values({ actorUserId: ctx.user.id, action: "admin.platform_settings.updated", entityType: "platform_settings", entityId: "1", ipAddress: ctx.req.ip || null, metadata: { allowPublicSignups: input.allowPublicSignups } });
+      return { success: true };
+    }),
     operations: adminProcedure.query(async () => { const db = await requireDb(); const [recentUsers, recentCreators, recentProducts, recentOrders, recentSubscriptions, recentPayments, recentTickets] = await Promise.all([db.select().from(users).orderBy(desc(users.createdAt)).limit(50), db.select().from(creators).orderBy(desc(creators.createdAt)).limit(50), db.select().from(products).orderBy(desc(products.createdAt)).limit(50), db.select().from(orders).orderBy(desc(orders.createdAt)).limit(50), db.select().from(subscriptions).orderBy(desc(subscriptions.createdAt)).limit(50), db.select().from(paymentEvents).orderBy(desc(paymentEvents.createdAt)).limit(50), db.select().from(supportTickets).orderBy(desc(supportTickets.createdAt)).limit(50)]); return { users: recentUsers.map(({ passwordHash, ...user }) => user), creators: recentCreators, products: recentProducts, orders: recentOrders, subscriptions: recentSubscriptions, payments: recentPayments, support: recentTickets }; }),
     reports: adminProcedure.input(z.object({ from: z.date().optional(), to: z.date().optional() })).query(async ({ input }) => { const db = await requireDb(); const [allUsers, allCreators, allOrders, allSubscriptions, allVisits, allTickets] = await Promise.all([db.select().from(users), db.select().from(creators), db.select().from(orders), db.select().from(subscriptions), db.select().from(storeVisits), db.select().from(supportTickets)]); const within = (date: Date) => (!input.from || date >= input.from) && (!input.to || date <= input.to); const ordersInRange = allOrders.filter((order) => within(order.createdAt)); const paid = ordersInRange.filter((order) => order.status === "paid"); const refunded = ordersInRange.filter((order) => order.status === "refunded"); return { users: allUsers.filter((user) => within(user.createdAt)).length, creators: allCreators.filter((creator) => within(creator.createdAt)).length, orders: ordersInRange.length, paidOrders: paid.length, refunds: refunded.length, gmv: paid.reduce((sum, order) => sum + Number(order.total), 0), activeSubscriptions: allSubscriptions.filter((subscription) => subscription.status === "active").length, visits: allVisits.filter((visit) => within(visit.createdAt)).length, openSupport: allTickets.filter((ticket) => ticket.status !== "resolved").length }; }),
-    enhancedReports: adminProcedure.input(z.object({ from: z.date().optional(), to: z.date().optional() })).query(async ({ input }) => { const db = await requireDb(); const [allSubscriptions, allPlans, allProducts, allPayments] = await Promise.all([db.select().from(subscriptions), db.select().from(membershipPlans), db.select().from(products), db.select().from(paymentEvents)]); const within = (date: Date) => (!input.from || date >= input.from) && (!input.to || date <= input.to); const plans = new Map(allPlans.map((plan) => [plan.id, plan])); const active = allSubscriptions.filter((subscription) => subscription.status === "active"); const mrr = active.reduce((sum, subscription) => { const plan = plans.get(subscription.planId); return sum + (plan ? Number(plan.price) / (plan.interval === "year" ? 12 : 1) : 0); }, 0); return { mrr, managedFiles: allProducts.filter((product) => Boolean(product.fileKey || product.fileUrl)).length, paymentEvents: allPayments.filter((event) => within(event.createdAt)).length, successfulPayments: allPayments.filter((event) => within(event.createdAt) && event.status === "processed").length, activeSubscriptions: active.length }; }),
-    files: adminProcedure.query(async () => { const db = await requireDb(); return db.select({ id: products.id, name: products.name, slug: products.slug, fileKey: products.fileKey, fileUrl: products.fileUrl, externalUrl: products.externalUrl, creatorId: products.creatorId, status: products.status, updatedAt: products.updatedAt }).from(products).orderBy(desc(products.updatedAt)).limit(100); }),
+    enhancedReports: adminProcedure.input(z.object({ from: z.date().optional(), to: z.date().optional() })).query(async ({ input }) => {
+      const db = await requireDb();
+      const [allSubscriptions, allPlans, initialProducts, allPayments, allUsers, allCreators, allOrders] = await Promise.all([db.select().from(subscriptions), db.select().from(membershipPlans), db.select().from(products), db.select().from(paymentEvents), db.select().from(users), db.select().from(creators), db.select().from(orders)]);
+      const unmeasured = initialProducts.map((product) => ({ id: product.id, key: product.fileSizeBytes === 0 ? product.fileKey || (product.fileUrl?.startsWith("/manus-storage/") ? product.fileUrl.replace("/manus-storage/", "") : null) : null })).filter((product): product is { id: number; key: string } => Boolean(product.key));
+      const measured = await Promise.allSettled(unmeasured.map(async (file) => ({ id: file.id, size: await storageGetObjectSize(file.key) })));
+      const resolved = measured.filter((result): result is PromiseFulfilledResult<{ id: number; size: number }> => result.status === "fulfilled").map((result) => result.value);
+      if (resolved.length) await Promise.all(resolved.map((file) => db.update(products).set({ fileSizeBytes: file.size }).where(eq(products.id, file.id))));
+      const sizeByProductId = new Map(resolved.map((file) => [file.id, file.size]));
+      const allProducts = initialProducts.map((product) => ({ ...product, fileSizeBytes: sizeByProductId.get(product.id) ?? product.fileSizeBytes }));
+      const rangeEnd = input.to ?? new Date(); const rangeStart = input.from ?? new Date(rangeEnd.getTime() - 30 * 24 * 60 * 60 * 1000); const duration = Math.max(rangeEnd.getTime() - rangeStart.getTime(), 24 * 60 * 60 * 1000); const previousStart = new Date(rangeStart.getTime() - duration);
+      const within = (date: Date) => date >= rangeStart && date <= rangeEnd; const previous = (date: Date) => date >= previousStart && date < rangeStart;
+      const plans = new Map(allPlans.map((plan) => [plan.id, plan])); const active = allSubscriptions.filter((subscription) => subscription.status === "active");
+      const mrr = active.reduce((sum, subscription) => { const plan = plans.get(subscription.planId); return sum + (plan ? Number(plan.price) / (plan.interval === "year" ? 12 : 1) : 0); }, 0);
+      const trackedFiles = allProducts.filter((product) => Boolean(product.fileKey || product.fileUrl)); const paidInRange = allOrders.filter((order) => within(order.createdAt) && order.status === "paid"); const paidPrevious = allOrders.filter((order) => previous(order.createdAt) && order.status === "paid");
+      const growth = (current: number, prior: number) => prior === 0 ? (current ? 100 : 0) : Math.round(((current - prior) / prior) * 100);
+      return { mrr, managedFiles: trackedFiles.length, storageBytes: trackedFiles.reduce((sum, product) => sum + product.fileSizeBytes, 0), storageAddedBytes: trackedFiles.filter((product) => within(product.updatedAt)).reduce((sum, product) => sum + product.fileSizeBytes, 0), unmeasuredFiles: unmeasured.length - resolved.length, paymentEvents: allPayments.filter((event) => within(event.createdAt)).length, successfulPayments: allPayments.filter((event) => within(event.createdAt) && event.status === "processed").length, activeSubscriptions: active.length, newAccounts: allUsers.filter((user) => within(user.createdAt)).length, accountGrowthPercent: growth(allUsers.filter((user) => within(user.createdAt)).length, allUsers.filter((user) => previous(user.createdAt)).length), newCreators: allCreators.filter((creator) => within(creator.createdAt)).length, paidOrderGrowthPercent: growth(paidInRange.length, paidPrevious.length), gmvGrowthPercent: growth(paidInRange.reduce((sum, order) => sum + Number(order.total), 0), paidPrevious.reduce((sum, order) => sum + Number(order.total), 0)) };
+    }),
+    files: adminProcedure.query(async () => { const db = await requireDb(); return db.select({ id: products.id, name: products.name, slug: products.slug, fileKey: products.fileKey, fileUrl: products.fileUrl, fileSizeBytes: products.fileSizeBytes, externalUrl: products.externalUrl, creatorId: products.creatorId, status: products.status, updatedAt: products.updatedAt }).from(products).orderBy(desc(products.updatedAt)).limit(100); }),
+    refreshStorageUsage: adminProcedure.mutation(async ({ ctx }) => {
+      const db = await requireDb();
+      const rows = await db.select({ id: products.id, fileKey: products.fileKey, fileUrl: products.fileUrl }).from(products);
+      const candidates = rows.map((row) => ({ id: row.id, key: row.fileKey || (row.fileUrl?.startsWith("/manus-storage/") ? row.fileUrl.replace("/manus-storage/", "") : null) })).filter((row): row is { id: number; key: string } => Boolean(row.key));
+      const results = await Promise.allSettled(candidates.map(async (file) => ({ id: file.id, size: await storageGetObjectSize(file.key) })));
+      const measured = results.filter((result): result is PromiseFulfilledResult<{ id: number; size: number }> => result.status === "fulfilled").map((result) => result.value);
+      await Promise.all(measured.map((file) => db.update(products).set({ fileSizeBytes: file.size }).where(eq(products.id, file.id))));
+      await db.insert(auditLogs).values({ actorUserId: ctx.user.id, action: "admin.storage_usage.refreshed", entityType: "storage", entityId: "platform", ipAddress: ctx.req.ip || null, metadata: { measuredFiles: measured.length, failedFiles: candidates.length - measured.length } });
+      return { measuredFiles: measured.length, failedFiles: candidates.length - measured.length, storageBytes: measured.reduce((sum, file) => sum + file.size, 0) };
+    }),
+    updateFileStatus: adminProcedure.input(z.object({ id: z.number().int(), status: z.enum(["draft", "archived"]) })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb(); const product = (await db.select({ id: products.id, name: products.name }).from(products).where(eq(products.id, input.id)).limit(1))[0];
+      if (!product) throw new TRPCError({ code: "NOT_FOUND", message: "Product file record not found." });
+      await db.update(products).set({ status: input.status }).where(eq(products.id, input.id));
+      await db.insert(auditLogs).values({ actorUserId: ctx.user.id, action: `admin.file.${input.status}`, entityType: "product", entityId: String(input.id), ipAddress: ctx.req.ip || null, metadata: { name: product.name } });
+      return { success: true };
+    }),
     sessions: adminProcedure.query(async () => { const db = await requireDb(); return db.select().from(userSessions).innerJoin(users, eq(userSessions.userId, users.id)).orderBy(desc(userSessions.createdAt)).limit(100); }),
     revokeSession: adminProcedure.input(z.object({ id: z.string().min(12).max(64) })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const session = (await db.select().from(userSessions).where(eq(userSessions.id, input.id)).limit(1))[0]; if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Session not found." }); await db.update(userSessions).set({ revokedAt: new Date() }).where(eq(userSessions.id, input.id)); await db.insert(auditLogs).values({ actorUserId: ctx.user.id, action: "admin.session.revoked", entityType: "session", entityId: input.id, ipAddress: ctx.req.ip || null, metadata: { userId: session.userId } }); return { success: true }; }),
     auditEvents: adminProcedure.query(async () => { const db = await requireDb(); return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(100); }),

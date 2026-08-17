@@ -45,7 +45,7 @@ async function startServer() {
       const contentType = typeof req.headers["x-content-type"] === "string" ? req.headers["x-content-type"] : "application/octet-stream";
       if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: "A file is required" });
       const stored = await storagePut(`creators/${creator.id}/digital-products/${fileName}`, req.body, contentType);
-      return res.status(201).json(stored);
+      return res.status(201).json({ ...stored, sizeBytes: req.body.length });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
       return res.status(500).json({ error: message });
