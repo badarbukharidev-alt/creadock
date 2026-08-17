@@ -38,3 +38,26 @@
 - [x] Add explicit bookings, memberships, customers, and public course-detail query error states through shared query-failure recovery and the friendly global error screen.
 - [x] Add lesson editing, removal, ordering, and creator-facing enrollment progress management.
 - [x] Add creator appointment management with status controls and configurable group-session capacity.
+- [x] Replace prototype authentication with first-party sign-up, login, logout, email verification, password reset, password hashing, secure server sessions, throttling, and session revocation.
+- [x] Extend role-based authorization to USER, ADMIN, SUPER_ADMIN, and SUPPORT with server-side permission checks and audit logging.
+- [x] Add account status, verification state, security events, session controls, and operational audit records to the database and API layer.
+- [x] Implement provider-agnostic transactional email infrastructure, professional verification/reset/purchase/delivery/booking/membership templates, and durable delivery records.
+- [ ] Replace MVP checkout states with real payment and webhook-driven order, subscription, refund, and entitlement lifecycle operations.
+- [ ] Build a complete platform administration interface for users, creators, stores, products, orders, payments, subscriptions, email, files, reports, settings, security, and support workflows.
+- [x] Add production-grade customer account access to purchased products, enrolled courses, booking records, and memberships.
+- [ ] Implement operational dashboards and reporting filters for users, stores, orders, GMV, MRR, subscriptions, storage, payments, support, growth, and activity.
+- [x] Add comprehensive security, authorization, persistence, and end-to-end workflow tests for the real SaaS conversion.
+- [x] Document provider credentials, deployment configuration, and runbook requirements for production activation.
+- [x] Use Stripe as the configured real payment provider with server-side checkout, verified webhooks, and idempotent payment events; live keys remain owner-managed configuration.
+- [x] Add administrator-managed SMTP readiness controls, sender identity, delivery records, and template dispatch; credentials remain secure server settings rather than browser-form data.
+- [x] Build CreaDock-owned email-and-password sign-up, login, verification, password reset, sessions, logout, and account security controls without social or external authentication.
+- [x] Provision the supplied CreaDock administrator as the initial verified SUPER_ADMIN account using the first-party password-hashing flow.
+- [x] Link first-party customer accounts to their creator CRM records and require verified entitlement ownership for private digital downloads.
+- [x] Add API and admin interfaces for active-session review, individual session revocation, and security/audit-event review.
+- [x] Dispatch booking-confirmation and product-delivery SMTP emails from completed real operations and test those deliveries.
+- [x] Let customers open and study their authenticated enrolled course lessons from the account portal.
+- [ ] Add browser-level workflow coverage for first-party auth, protected downloads, verified Stripe fulfillment, and role-gated staff access.
+- [x] Add an admin email-delivery log view with status, recipient, subject, time, and failure details.
+- [x] Add an administrator-facing active-session review and revocation interface.
+- [x] Add unit coverage for booking-confirmation and product-delivery email dispatch paths.
+- [x] Add and verify an Open course action from the customer library to authenticated enrolled lessons.

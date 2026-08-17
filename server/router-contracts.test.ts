@@ -25,4 +25,19 @@ describe("CreaDock router contracts", () => {
     const caller = appRouter.createCaller(anonymousContext());
     await expect(caller.storefront.subscribe({ handle: "creator", email: "not-an-email" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
+
+  it("protects first-party session history from anonymous callers", async () => {
+    const caller = appRouter.createCaller(anonymousContext());
+    await expect(caller.auth.sessions()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("protects entitlement-gated customer downloads from anonymous callers", async () => {
+    const caller = appRouter.createCaller(anonymousContext());
+    await expect(caller.account.download({ productId: 1 })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("protects administrator email-delivery records from anonymous callers", async () => {
+    const caller = appRouter.createCaller(anonymousContext());
+    await expect(caller.admin.emailDeliveries()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });

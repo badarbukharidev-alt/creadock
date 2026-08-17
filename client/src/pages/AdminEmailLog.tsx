@@ -1,0 +1,13 @@
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { trpc } from "@/lib/trpc";
+import { ArrowLeft, Mail } from "lucide-react";
+import { Link } from "wouter";
+
+const tone = (status: string) => status === "sent" ? "bg-emerald-50 text-emerald-700" : status === "failed" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700";
+
+export default function AdminEmailLog() {
+  const { user } = useAuth(); const staff = Boolean(user && ["admin", "super_admin", "support"].includes(user.role)); const deliveries = trpc.admin.emailDeliveries.useQuery(undefined, { enabled: staff });
+  if (!staff) return <main className="grid min-h-screen place-items-center bg-[#f7f7f3] px-6 text-center"><div><Mail className="mx-auto h-7 w-7 text-slate-400" /><h1 className="mt-4 text-2xl font-semibold text-slate-950">Admin access required</h1><Link href="/admin"><Button variant="outline" className="mt-5"><ArrowLeft className="mr-2 h-4 w-4" />Back to admin</Button></Link></div></main>;
+  return <main className="min-h-screen bg-[#f7f7f3] px-5 py-8 md:px-10"><div className="mx-auto max-w-6xl"><Link href="/admin" className="text-xs font-medium text-slate-400 hover:text-slate-700">← CreaDock Admin</Link><header className="mt-8"><p className="text-[10px] font-semibold uppercase tracking-[.14em] text-slate-400">Delivery operations</p><h1 className="mt-2 text-3xl font-semibold tracking-[-.06em] text-slate-950">Email delivery log</h1><p className="mt-2 text-sm text-slate-500">Queued, delivered, and failed transactional email records.</p></header><section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white"><div className="grid grid-cols-[1fr_auto] gap-4 border-b border-slate-100 px-5 py-3 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400"><span>Message</span><span>Status</span></div>{deliveries.data?.length ? <div className="divide-y divide-slate-100">{deliveries.data.map((delivery) => <div className="grid grid-cols-[1fr_auto] gap-4 px-5 py-4" key={delivery.id}><div className="min-w-0"><p className="truncate text-sm font-medium text-slate-900">{delivery.subject}</p><p className="mt-1 truncate text-xs text-slate-400">{delivery.recipient} · {delivery.kind} · {new Date(delivery.createdAt).toLocaleString()}</p>{delivery.errorMessage ? <p className="mt-2 text-xs text-rose-600">{delivery.errorMessage}</p> : null}</div><span className={`h-fit rounded-full px-2 py-1 text-xs font-medium ${tone(delivery.status)}`}>{delivery.status}</span></div>)}</div> : <p className="px-5 py-10 text-center text-sm text-slate-400">No delivery records yet.</p>}</section></div></main>;
+}

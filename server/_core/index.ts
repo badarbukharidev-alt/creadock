@@ -3,13 +3,13 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { sdk } from "./sdk";
+import { getFirstPartyUser } from "../auth";
 import { getOrCreateCreator } from "../db";
 import { storagePut } from "../storage";
+import { handleStripeWebhook } from "../stripeWebhook";
 import { serveStatic, setupVite } from "./vite";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -34,9 +34,11 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
   app.post("/api/uploads/product", express.raw({ type: "application/octet-stream", limit: "50mb" }), async (req, res) => {
     try {
-      const user = await sdk.authenticateRequest(req);
+      const user = await getFirstPartyUser(req);
+      if (!user) return res.status(401).json({ error: "Sign in to upload a product file" });
       const creator = await getOrCreateCreator(user);
       const rawName = typeof req.query.name === "string" ? req.query.name : "download";
       const fileName = rawName.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 180) || "download";
@@ -53,7 +55,6 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
-  registerOAuthRoutes(app);
   // tRPC API
   app.use(
     "/api/trpc",

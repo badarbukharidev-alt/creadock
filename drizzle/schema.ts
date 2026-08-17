@@ -18,11 +18,52 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  normalizedEmail: varchar("normalizedEmail", { length: 320 }),
+  username: varchar("username", { length: 64 }),
+  passwordHash: varchar("passwordHash", { length: 255 }),
+  emailVerifiedAt: timestamp("emailVerifiedAt"),
+  accountStatus: mysqlEnum("accountStatus", ["pending", "active", "suspended"]).default("pending").notNull(),
+  failedLoginCount: int("failedLoginCount").default(0).notNull(),
+  lockedUntil: timestamp("lockedUntil"),
+  lastPasswordChangedAt: timestamp("lastPasswordChangedAt"),
+  role: mysqlEnum("role", ["user", "admin", "super_admin", "support"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
-});
+}, (table) => [uniqueIndex("users_normalized_email_idx").on(table.normalizedEmail), uniqueIndex("users_username_idx").on(table.username), index("users_status_idx").on(table.accountStatus)]);
+
+export const userSessions = mysqlTable("userSessions", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  lastUsedAt: timestamp("lastUsedAt").defaultNow().notNull(),
+  revokedAt: timestamp("revokedAt"),
+  ipAddress: varchar("ipAddress", { length: 64 }),
+  userAgent: varchar("userAgent", { length: 512 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("user_sessions_user_idx").on(table.userId), index("user_sessions_expiry_idx").on(table.expiresAt)]);
+
+export const authTokens = mysqlTable("authTokens", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: mysqlEnum("type", ["email_verification", "password_reset"]).notNull(),
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  consumedAt: timestamp("consumedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("auth_tokens_user_type_idx").on(table.userId, table.type), index("auth_tokens_expiry_idx").on(table.expiresAt)]);
+
+export const auditLogs = mysqlTable("auditLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  actorUserId: int("actorUserId").references(() => users.id, { onDelete: "set null" }),
+  action: varchar("action", { length: 160 }).notNull(),
+  entityType: varchar("entityType", { length: 80 }).notNull(),
+  entityId: varchar("entityId", { length: 80 }),
+  ipAddress: varchar("ipAddress", { length: 64 }),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("audit_logs_actor_idx").on(table.actorUserId, table.createdAt), index("audit_logs_entity_idx").on(table.entityType, table.entityId)]);
 
 export const creators = mysqlTable("creators", {
   id: int("id").autoincrement().primaryKey(),
@@ -102,6 +143,7 @@ export const lessons = mysqlTable("lessons", {
 export const customers = mysqlTable("customers", {
   id: int("id").autoincrement().primaryKey(),
   creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  userId: int("userId").references(() => users.id, { onDelete: "set null" }),
   email: varchar("email", { length: 320 }).notNull(),
   name: varchar("name", { length: 255 }),
   tags: json("tags").$type<string[]>(),
@@ -110,7 +152,7 @@ export const customers = mysqlTable("customers", {
   marketingOptIn: boolean("marketingOptIn").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, (table) => [uniqueIndex("customers_creator_email_idx").on(table.creatorId, table.email), index("customers_creator_idx").on(table.creatorId)]);
+}, (table) => [uniqueIndex("customers_creator_email_idx").on(table.creatorId, table.email), index("customers_creator_idx").on(table.creatorId), index("customers_user_idx").on(table.userId)]);
 
 export const enrollments = mysqlTable("enrollments", {
   id: int("id").autoincrement().primaryKey(),
@@ -195,10 +237,11 @@ export const orders = mysqlTable("orders", {
   status: mysqlEnum("status", ["pending", "paid", "refunded", "cancelled"]).default("pending").notNull(),
   total: decimal("total", { precision: 10, scale: 2 }).default("0.00").notNull(),
   currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+  stripeCheckoutSessionId: varchar("stripeCheckoutSessionId", { length: 255 }),
   stripePaymentIntentId: varchar("stripePaymentIntentId", { length: 255 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, (table) => [index("orders_creator_status_idx").on(table.creatorId, table.status), index("orders_customer_idx").on(table.customerId)]);
+}, (table) => [index("orders_creator_status_idx").on(table.creatorId, table.status), index("orders_customer_idx").on(table.customerId), uniqueIndex("orders_stripe_checkout_session_idx").on(table.stripeCheckoutSessionId)]);
 
 export const orderItems = mysqlTable("orderItems", {
   id: int("id").autoincrement().primaryKey(),
@@ -260,6 +303,36 @@ export const emailSequenceSteps = mysqlTable("emailSequenceSteps", {
   sortOrder: int("sortOrder").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [index("email_sequence_steps_idx").on(table.sequenceId, table.sortOrder)]);
+
+export const emailDeliveries = mysqlTable("emailDeliveries", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").references(() => creators.id, { onDelete: "set null" }),
+  userId: int("userId").references(() => users.id, { onDelete: "set null" }),
+  customerId: int("customerId").references(() => customers.id, { onDelete: "set null" }),
+  campaignId: int("campaignId").references(() => emailCampaigns.id, { onDelete: "set null" }),
+  kind: mysqlEnum("kind", ["verification", "password_reset", "welcome", "purchase_confirmation", "product_delivery", "booking_confirmation", "membership_confirmation", "broadcast"]).notNull(),
+  recipient: varchar("recipient", { length: 320 }).notNull(),
+  subject: varchar("subject", { length: 255 }).notNull(),
+  status: mysqlEnum("status", ["queued", "sent", "failed", "bounced", "unsubscribed"]).default("queued").notNull(),
+  providerMessageId: varchar("providerMessageId", { length: 255 }),
+  errorMessage: varchar("errorMessage", { length: 1000 }),
+  sentAt: timestamp("sentAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("email_deliveries_creator_idx").on(table.creatorId, table.createdAt), index("email_deliveries_status_idx").on(table.status, table.createdAt), index("email_deliveries_campaign_idx").on(table.campaignId)]);
+
+export const paymentEvents = mysqlTable("paymentEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  provider: mysqlEnum("provider", ["stripe"]).default("stripe").notNull(),
+  providerEventId: varchar("providerEventId", { length: 255 }).notNull().unique(),
+  eventType: varchar("eventType", { length: 160 }).notNull(),
+  orderId: int("orderId").references(() => orders.id, { onDelete: "set null" }),
+  subscriptionId: int("subscriptionId").references(() => subscriptions.id, { onDelete: "set null" }),
+  status: mysqlEnum("status", ["received", "processed", "failed"]).default("received").notNull(),
+  errorMessage: varchar("errorMessage", { length: 1000 }),
+  occurredAt: timestamp("occurredAt").notNull(),
+  processedAt: timestamp("processedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("payment_events_status_idx").on(table.status, table.createdAt), index("payment_events_order_idx").on(table.orderId)]);
 
 export const supportTickets = mysqlTable("supportTickets", {
   id: int("id").autoincrement().primaryKey(),

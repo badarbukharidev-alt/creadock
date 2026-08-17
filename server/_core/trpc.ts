@@ -27,19 +27,17 @@ const requireUser = t.middleware(async opts => {
 
 export const protectedProcedure = t.procedure.use(requireUser);
 
+const requireRole = (roles: Array<"admin" | "super_admin" | "support">) => t.middleware(async opts => {
+  const { ctx, next } = opts;
+  if (!ctx.user || !roles.includes(ctx.user.role as "admin" | "super_admin" | "support")) {
+    throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+  }
+  return next({ ctx: { ...ctx, user: ctx.user } });
+});
+
 export const adminProcedure = t.procedure.use(
-  t.middleware(async opts => {
-    const { ctx, next } = opts;
-
-    if (!ctx.user || ctx.user.role !== 'admin') {
-      throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
-    }
-
-    return next({
-      ctx: {
-        ...ctx,
-        user: ctx.user,
-      },
-    });
-  }),
+  requireRole(["admin", "super_admin"]),
 );
+
+export const staffProcedure = t.procedure.use(requireRole(["admin", "super_admin", "support"]));
+export const superAdminProcedure = t.procedure.use(requireRole(["super_admin"]));

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
-import { appointments, courses, customers, digitalEntitlements, emailCampaigns, enrollments, lessons, membershipPlans, orderItems, orders, products, services, subscriptions } from "../drizzle/schema";
+import { appointments, courses, customers, digitalEntitlements, emailCampaigns, emailDeliveries, enrollments, lessons, membershipPlans, orderItems, orders, products, services, subscriptions } from "../drizzle/schema";
 
 const state = vi.hoisted(() => ({
   rows: new Map<unknown, Array<Record<string, unknown>>>(),
@@ -47,6 +47,14 @@ vi.mock("./db", () => ({
   getAdminSummary: async () => ({}),
 }));
 
+vi.mock("./payments", () => ({
+  stripeProvider: {
+    isConfigured: () => true,
+    createCheckout: async ({ orderId }: { orderId: number }) => ({ id: `cs_test_${orderId}`, url: `https://checkout.stripe.test/session/${orderId}` }),
+  },
+  stripeStatus: () => ({ configured: true }),
+}));
+
 const { appRouter } = await import("./routers");
 
 function creatorContext(): TrpcContext {
@@ -61,22 +69,24 @@ beforeEach(() => {
   state.rows.clear(); state.inserts.length = 0; state.updates.length = 0; state.nextId = 10;
 });
 
-describe("CreaDock MVP router success paths", () => {
-  it("creates a paid product order and persistent digital entitlement", async () => {
+describe("CreaDock commerce router success paths", () => {
+  it("creates a pending product order and a real Stripe Checkout Session", async () => {
     state.rows.set(products, [{ id: 2, creatorId: 1, name: "Creator kit", status: "published", price: "24.00", currency: "USD", fileUrl: "/manus-storage/kit.pdf", externalUrl: null }]);
     state.rows.set(customers, []); state.rows.set(lessons, []);
     const result = await appRouter.createCaller(creatorContext()).storefront.purchase({ handle: "creator", email: "buyer@example.com", productId: 2 });
-    expect(result).toMatchObject({ kind: "product", productName: "Creator kit", deliveryUrl: "/manus-storage/kit.pdf" });
-    expect(state.inserts.some((entry) => entry.table === orders && (entry.values as { status: string }).status === "paid")).toBe(true);
+    expect(result).toMatchObject({ kind: "product", productName: "Creator kit" });
+    expect(result.checkoutUrl).toContain("https://checkout.stripe.test/session/");
+    expect(state.inserts.some((entry) => entry.table === orders && (entry.values as { status: string }).status === "pending")).toBe(true);
     expect(state.inserts.some((entry) => entry.table === orderItems)).toBe(true);
-    expect(state.inserts.some((entry) => entry.table === digitalEntitlements && (entry.values as { deliveryUrl: string }).deliveryUrl === "/manus-storage/kit.pdf")).toBe(true);
+    expect(state.inserts.some((entry) => entry.table === digitalEntitlements)).toBe(false);
   });
 
-  it("creates an active membership subscription from an MVP join", async () => {
+  it("creates a pending membership order and a Stripe subscription checkout", async () => {
     state.rows.set(membershipPlans, [{ id: 3, creatorId: 1, name: "Studio", status: "published", price: "12.00", interval: "month" }]); state.rows.set(customers, []);
     const result = await appRouter.createCaller(creatorContext()).storefront.purchase({ handle: "creator", email: "member@example.com", membershipPlanId: 3 });
     expect(result).toMatchObject({ kind: "membership", planName: "Studio" });
-    expect(state.inserts.some((entry) => entry.table === subscriptions && (entry.values as { status: string }).status === "active")).toBe(true);
+    expect(result.checkoutUrl).toContain("https://checkout.stripe.test/session/");
+    expect(state.inserts.some((entry) => entry.table === subscriptions)).toBe(false);
   });
 
   it("confirms an MVP booking reservation", async () => {
@@ -84,6 +94,7 @@ describe("CreaDock MVP router success paths", () => {
     const result = await appRouter.createCaller(creatorContext()).storefront.book({ handle: "creator", serviceId: 4, email: "guest@example.com" });
     expect(result).toMatchObject({ serviceName: "Office hours" });
     expect(state.inserts.some((entry) => entry.table === appointments && (entry.values as { status: string }).status === "confirmed")).toBe(true);
+    expect(state.inserts.some((entry) => entry.table === emailDeliveries && (entry.values as { kind: string }).kind === "booking_confirmation")).toBe(true);
   });
 
   it("persists completed course lesson progress", async () => {

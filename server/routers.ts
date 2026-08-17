@@ -5,6 +5,7 @@ import { z } from "zod";
 import { makeProductSlug, normalizeTags } from "../shared/commerce";
 import { mergeCompletedLesson, mvpActiveMembership, mvpCampaignSent, mvpConfirmedBooking, mvpPaidOrder } from "../shared/mvp-workflows";
 import {
+  auditLogs,
   appointments,
   availabilitySlots,
   courses,
@@ -13,6 +14,7 @@ import {
   digitalEntitlements,
   emailAudiences,
   emailCampaigns,
+  emailDeliveries,
   emailSequenceSteps,
   emailSequences,
   enrollments,
@@ -20,15 +22,23 @@ import {
   membershipPlans,
   orders,
   orderItems,
+  paymentEvents,
   products,
   services,
   storeVisits,
   storefrontBlocks,
   subscriptions,
   supportTickets,
+  userSessions,
+  users,
 } from "../drizzle/schema";
 import { getAdminSummary, getCreatorDashboard, getCreatorForHandle, getDb, getOrCreateCreator } from "./db";
-import { getSessionCookieOptions } from "./_core/cookies";
+import { login, logoutAll, logoutCurrent, requestPasswordReset, resetPassword, signUp, verifyEmail } from "./auth";
+import { emailTemplates, sendEmail } from "./email";
+import { stripeProvider } from "./payments";
+import { smtpStatus } from "./email";
+import { stripeStatus } from "./payments";
+import { storageGetSignedUrl } from "./storage";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 
@@ -42,13 +52,14 @@ async function ownedCreator(ctx: { user: { id: number; name?: string | null } })
   return getOrCreateCreator(ctx.user);
 }
 
-async function getOrCreateCustomer(db: Awaited<ReturnType<typeof requireDb>>, creatorId: number, email: string, name?: string, marketingOptIn = false) {
-  const current = (await db.select().from(customers).where(and(eq(customers.creatorId, creatorId), eq(customers.email, email))).limit(1))[0];
+async function getOrCreateCustomer(db: Awaited<ReturnType<typeof requireDb>>, creatorId: number, email: string, name?: string, marketingOptIn = false, userId?: number) {
+  const normalizedEmail = email.trim().toLowerCase();
+  const current = (await db.select().from(customers).where(and(eq(customers.creatorId, creatorId), eq(customers.email, normalizedEmail))).limit(1))[0];
   if (current) {
-    if (marketingOptIn && !current.marketingOptIn) await db.update(customers).set({ marketingOptIn: true }).where(eq(customers.id, current.id));
+    if ((marketingOptIn && !current.marketingOptIn) || (userId && current.userId !== userId)) await db.update(customers).set({ marketingOptIn: marketingOptIn || current.marketingOptIn, userId: userId ?? current.userId }).where(eq(customers.id, current.id));
     return current;
   }
-  const result = await db.insert(customers).values({ creatorId, email, name: name ?? null, tags: marketingOptIn ? ["subscriber"] : ["customer"], marketingOptIn });
+  const result = await db.insert(customers).values({ creatorId, userId: userId ?? null, email: normalizedEmail, name: name ?? null, tags: marketingOptIn ? ["subscriber"] : ["customer"], marketingOptIn });
   return (await db.select().from(customers).where(eq(customers.id, Number(result[0].insertId))).limit(1))[0]!;
 }
 
@@ -71,10 +82,42 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
-      ctx.res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(ctx.req), maxAge: -1 });
-      return { success: true } as const;
+    signUp: publicProcedure.input(z.object({ name: z.string().trim().min(2).max(160), email: z.string().email().max(320), username: z.string().min(3).max(32), password: z.string().min(12).max(128), confirmPassword: z.string().min(12).max(128) })).mutation(async ({ ctx, input }) => {
+      if (input.password !== input.confirmPassword) throw new TRPCError({ code: "BAD_REQUEST", message: "Passwords do not match." });
+      const result = await signUp(input, ctx.req);
+      if (!result.ok) throw new TRPCError({ code: result.code as "BAD_REQUEST" | "CONFLICT", message: result.message });
+      await sendEmail({ to: input.email, ...emailTemplates.verification(input.name, result.verificationToken, ctx.req) }, { kind: "verification", userId: result.userId });
+      return { success: true, message: "Account created. Check your email to verify your CreaDock account." };
     }),
+    login: publicProcedure.input(z.object({ email: z.string().email().max(320), password: z.string().min(1).max(128), remember: z.boolean().default(true) })).mutation(async ({ ctx, input }) => {
+      const result = await login(input, ctx.req, ctx.res);
+      if (!result.ok) throw new TRPCError({ code: result.code as "UNAUTHORIZED" | "FORBIDDEN" | "TOO_MANY_REQUESTS", message: result.message });
+      return { success: true, user: result.user };
+    }),
+    verifyEmail: publicProcedure.input(z.object({ token: z.string().min(20).max(256) })).mutation(async ({ ctx, input }) => {
+      const result = await verifyEmail(input.token, ctx.req, ctx.res);
+      if (!result.ok) throw new TRPCError({ code: "BAD_REQUEST", message: result.message });
+      await sendEmail({ to: result.user.email || "", ...emailTemplates.welcome(result.user.name || "there") }, { kind: "welcome", userId: result.user.id });
+      return { success: true };
+    }),
+    requestPasswordReset: publicProcedure.input(z.object({ email: z.string().email().max(320) })).mutation(async ({ ctx, input }) => {
+      const result = await requestPasswordReset(input.email, ctx.req);
+      if (result.resetToken) {
+        await sendEmail({ to: result.user.email || input.email, ...emailTemplates.passwordReset(result.user.name || "there", result.resetToken, ctx.req) }, { kind: "password_reset", userId: result.user.id });
+      }
+      return { success: true, message: "If an eligible account exists, a reset email has been requested." };
+    }),
+    resetPassword: publicProcedure.input(z.object({ token: z.string().min(20).max(256), password: z.string().min(12).max(128), confirmPassword: z.string().min(12).max(128) })).mutation(async ({ ctx, input }) => {
+      if (input.password !== input.confirmPassword) throw new TRPCError({ code: "BAD_REQUEST", message: "Passwords do not match." });
+      const result = await resetPassword(input.token, input.password, ctx.req);
+      if (!result.ok) throw new TRPCError({ code: "BAD_REQUEST", message: result.message });
+      return { success: true };
+    }),
+    logout: publicProcedure.mutation(async ({ ctx }) => { await logoutCurrent(ctx.req, ctx.res); return { success: true } as const; }),
+    logoutAll: protectedProcedure.mutation(async ({ ctx }) => { await logoutAll(ctx.user.id, ctx.req, ctx.res); return { success: true } as const; }),
+    sessions: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); return db.select({ id: userSessions.id, expiresAt: userSessions.expiresAt, lastUsedAt: userSessions.lastUsedAt, revokedAt: userSessions.revokedAt, ipAddress: userSessions.ipAddress, userAgent: userSessions.userAgent, createdAt: userSessions.createdAt }).from(userSessions).where(eq(userSessions.userId, ctx.user.id)).orderBy(desc(userSessions.createdAt)); }),
+    revokeSession: protectedProcedure.input(z.object({ id: z.string().min(12).max(64) })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const session = (await db.select({ id: userSessions.id }).from(userSessions).where(and(eq(userSessions.id, input.id), eq(userSessions.userId, ctx.user.id))).limit(1))[0]; if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Session not found." }); await db.update(userSessions).set({ revokedAt: new Date() }).where(eq(userSessions.id, input.id)); await db.insert(auditLogs).values({ actorUserId: ctx.user.id, action: "auth.session.revoked", entityType: "session", entityId: input.id, ipAddress: ctx.req.ip || null }); return { success: true }; }),
+    securityEvents: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); return db.select().from(auditLogs).where(eq(auditLogs.actorUserId, ctx.user.id)).orderBy(desc(auditLogs.createdAt)).limit(100); }),
   }),
   dashboard: router({
     overview: protectedProcedure.query(async ({ ctx }) => getCreatorDashboard((await ownedCreator(ctx)).id)),
@@ -107,7 +150,7 @@ export const appRouter = router({
     }),
     save: protectedProcedure.input(productInput).mutation(async ({ ctx, input }) => {
       const db = await requireDb(); const creator = await ownedCreator(ctx);
-      const payload = { ...input, slug: makeProductSlug(input.name), fileUrl: input.fileUrl || null, externalUrl: input.externalUrl || null };
+      const payload = { ...input, slug: makeProductSlug(input.name), fileUrl: input.fileUrl || null, fileKey: input.fileUrl?.startsWith("/manus-storage/") ? input.fileUrl.replace("/manus-storage/", "") : null, externalUrl: input.externalUrl || null };
       if (input.id) {
         await db.update(products).set(payload).where(and(eq(products.id, input.id), eq(products.creatorId, creator.id)));
         return input.id;
@@ -167,6 +210,22 @@ export const appRouter = router({
     save: protectedProcedure.input(z.object({ name: z.string().max(255).optional(), email: z.string().email(), tags: z.array(z.string().max(64)).max(20).optional(), marketingOptIn: z.boolean().default(false) })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); const tags = normalizeTags(input.tags ?? []); await db.insert(customers).values({ ...input, creatorId: creator.id, tags }).onDuplicateKeyUpdate({ set: { name: input.name ?? null, tags, marketingOptIn: input.marketingOptIn } }); return { success: true }; }),
     activity: protectedProcedure.input(z.object({ customerId: z.number().int() })).query(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); const customer = (await db.select().from(customers).where(and(eq(customers.id, input.customerId), eq(customers.creatorId, creator.id))).limit(1))[0]; if (!customer) throw new TRPCError({ code: "NOT_FOUND" }); const [purchaseHistory, memberships, bookings, enrollmentsForCustomer] = await Promise.all([db.select().from(orders).where(and(eq(orders.customerId, customer.id), eq(orders.creatorId, creator.id))).orderBy(desc(orders.createdAt)), db.select().from(subscriptions).innerJoin(membershipPlans, eq(subscriptions.planId, membershipPlans.id)).where(eq(subscriptions.customerId, customer.id)), db.select().from(appointments).innerJoin(services, eq(appointments.serviceId, services.id)).where(eq(appointments.customerId, customer.id)), db.select().from(enrollments).innerJoin(courses, eq(enrollments.courseId, courses.id)).where(eq(enrollments.customerId, customer.id))]); return { customer, purchaseHistory, memberships, bookings, enrollments: enrollmentsForCustomer }; }),
   }),
+  account: router({
+    purchases: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); return db.select().from(orders).innerJoin(customers, eq(orders.customerId, customers.id)).innerJoin(orderItems, eq(orderItems.orderId, orders.id)).where(eq(customers.userId, ctx.user.id)).orderBy(desc(orders.createdAt)); }),
+    learning: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); return db.select().from(enrollments).innerJoin(customers, eq(enrollments.customerId, customers.id)).innerJoin(courses, eq(enrollments.courseId, courses.id)).where(eq(customers.userId, ctx.user.id)); }),
+    bookings: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); return db.select().from(appointments).innerJoin(customers, eq(appointments.customerId, customers.id)).innerJoin(services, eq(appointments.serviceId, services.id)).where(eq(customers.userId, ctx.user.id)).orderBy(desc(appointments.createdAt)); }),
+    memberships: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); return db.select().from(subscriptions).innerJoin(customers, eq(subscriptions.customerId, customers.id)).innerJoin(membershipPlans, eq(subscriptions.planId, membershipPlans.id)).where(eq(customers.userId, ctx.user.id)).orderBy(desc(subscriptions.createdAt)); }),
+    course: protectedProcedure.input(z.object({ courseId: z.number().int() })).query(async ({ ctx, input }) => { const db = await requireDb(); const row = (await db.select().from(enrollments).innerJoin(customers, eq(enrollments.customerId, customers.id)).innerJoin(courses, eq(enrollments.courseId, courses.id)).where(and(eq(customers.userId, ctx.user.id), eq(enrollments.courseId, input.courseId))).limit(1))[0]; if (!row) throw new TRPCError({ code: "FORBIDDEN", message: "You are not enrolled in this course." }); return { course: row.courses, enrollment: row.enrollments, lessons: await db.select().from(lessons).where(eq(lessons.courseId, input.courseId)).orderBy(lessons.sortOrder) }; }),
+    completeLesson: protectedProcedure.input(z.object({ courseId: z.number().int(), lessonId: z.number().int() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const row = (await db.select().from(enrollments).innerJoin(customers, eq(enrollments.customerId, customers.id)).where(and(eq(customers.userId, ctx.user.id), eq(enrollments.courseId, input.courseId))).limit(1))[0]; if (!row) throw new TRPCError({ code: "FORBIDDEN", message: "You are not enrolled in this course." }); const lesson = (await db.select({ id: lessons.id }).from(lessons).where(and(eq(lessons.id, input.lessonId), eq(lessons.courseId, input.courseId))).limit(1))[0]; if (!lesson) throw new TRPCError({ code: "NOT_FOUND", message: "Lesson not found." }); const completedLessonIds = mergeCompletedLesson(row.enrollments.completedLessonIds ?? [], input.lessonId); const lessonCount = (await db.select({ id: lessons.id }).from(lessons).where(eq(lessons.courseId, input.courseId))).length; await db.update(enrollments).set({ completedLessonIds, completedAt: completedLessonIds.length === lessonCount ? new Date() : null }).where(eq(enrollments.id, row.enrollments.id)); return { completedLessonIds }; }),
+    download: protectedProcedure.input(z.object({ productId: z.number().int() })).query(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const row = (await db.select().from(digitalEntitlements).innerJoin(customers, eq(digitalEntitlements.customerId, customers.id)).innerJoin(products, eq(digitalEntitlements.productId, products.id)).where(and(eq(customers.userId, ctx.user.id), eq(digitalEntitlements.productId, input.productId))).limit(1))[0];
+      if (!row) throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this product." });
+      const fileKey = row.products.fileKey || (row.products.fileUrl?.startsWith("/manus-storage/") ? row.products.fileUrl.replace("/manus-storage/", "") : null);
+      if (!fileKey) throw new TRPCError({ code: "NOT_FOUND", message: "No protected file is attached to this product." });
+      return { url: await storageGetSignedUrl(fileKey), filename: row.products.name };
+    }),
+  }),
   marketing: router({
     overview: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); const [audiences, campaigns, sequences] = await Promise.all([db.select().from(emailAudiences).where(eq(emailAudiences.creatorId, creator.id)), db.select().from(emailCampaigns).where(eq(emailCampaigns.creatorId, creator.id)).orderBy(desc(emailCampaigns.createdAt)), db.select().from(emailSequences).where(eq(emailSequences.creatorId, creator.id))]); return { audiences, campaigns, sequences }; }),
     createAudience: protectedProcedure.input(z.object({ name: z.string().min(2).max(255), description: z.string().max(1000).optional() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); const result = await db.insert(emailAudiences).values({ ...input, creatorId: creator.id }); return Number(result[0].insertId); }),
@@ -187,47 +246,69 @@ export const appRouter = router({
       ]);
       return { creator, catalog, memberships, bookingServices, blocks, courses: courseCatalog };
     }),
-    subscribe: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), email: z.string().email(), name: z.string().max(255).optional() })).mutation(async ({ input }) => {
+    subscribe: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), email: z.string().email(), name: z.string().max(255).optional() })).mutation(async ({ input, ctx }) => {
       const db = await requireDb();
       const creator = await getCreatorForHandle(input.handle);
       if (!creator) throw new TRPCError({ code: "NOT_FOUND" });
-      await db.insert(customers).values({ creatorId: creator.id, email: input.email, name: input.name ?? null, tags: ["subscriber"], marketingOptIn: true }).onDuplicateKeyUpdate({ set: { marketingOptIn: true } });
+      await getOrCreateCustomer(db, creator.id, input.email, input.name, true, ctx.user?.normalizedEmail === input.email.trim().toLowerCase() ? ctx.user.id : undefined);
       return { success: true };
     }),
-    purchase: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), email: z.string().email(), name: z.string().max(255).optional(), productId: z.number().int().optional(), membershipPlanId: z.number().int().optional() }).refine((input) => Boolean(input.productId) !== Boolean(input.membershipPlanId), "Select one offer to purchase")).mutation(async ({ input }) => {
+    purchase: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), email: z.string().email(), name: z.string().max(255).optional(), productId: z.number().int().optional(), membershipPlanId: z.number().int().optional() }).refine((input) => Boolean(input.productId) !== Boolean(input.membershipPlanId), "Select one offer to purchase")).mutation(async ({ input, ctx }) => {
       const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator) throw new TRPCError({ code: "NOT_FOUND" });
-      const customer = await getOrCreateCustomer(db, creator.id, input.email, input.name);
+      if (!stripeProvider.isConfigured()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Payments are not configured yet. Add Stripe keys in the platform settings." });
+      const customer = await getOrCreateCustomer(db, creator.id, input.email, input.name, false, ctx.user?.normalizedEmail === input.email.trim().toLowerCase() ? ctx.user.id : undefined);
+      const host = ctx.req.headers.host || "localhost";
+      const origin = ctx.req.headers.origin || `${ctx.req.protocol === "https" ? "https" : "http"}://${host}`;
       if (input.productId) {
         const product = (await db.select().from(products).where(and(eq(products.id, input.productId), eq(products.creatorId, creator.id), eq(products.status, "published"))).limit(1))[0];
         if (!product) throw new TRPCError({ code: "NOT_FOUND", message: "Offer is unavailable" });
-        const orderResult = await db.insert(orders).values({ creatorId: creator.id, customerId: customer.id, orderNumber: mvpOrderNumber(), ...mvpPaidOrder(), total: product.price, currency: product.currency });
+        const orderResult = await db.insert(orders).values({ creatorId: creator.id, customerId: customer.id, orderNumber: mvpOrderNumber(), status: "pending", total: product.price, currency: product.currency });
         const orderId = Number(orderResult[0].insertId);
         await db.insert(orderItems).values({ orderId, productId: product.id, title: product.name, unitPrice: product.price });
-        const deliveryUrl = product.fileUrl || product.externalUrl || null;
-        await db.insert(digitalEntitlements).values({ customerId: customer.id, productId: product.id, orderId, deliveryUrl }).onDuplicateKeyUpdate({ set: { orderId, deliveryUrl } });
-        const linkedCourses = await db.select().from(courses).where(and(eq(courses.creatorId, creator.id), eq(courses.productId, product.id)));
-        for (const course of linkedCourses) await db.insert(enrollments).values({ courseId: course.id, customerId: customer.id, completedLessonIds: [] }).onDuplicateKeyUpdate({ set: { customerId: customer.id } });
-        return { kind: "product" as const, orderId, orderNumber: (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0]!.orderNumber, deliveryUrl, productName: product.name };
+        const checkout = await stripeProvider.createCheckout({ orderId, customerEmail: customer.email, title: product.name, amount: String(product.price), currency: product.currency, mode: "payment", successUrl: `${origin}/c/${input.handle}?checkout=success&session_id={CHECKOUT_SESSION_ID}`, cancelUrl: `${origin}/c/${input.handle}?checkout=cancelled`, metadata: { creatorId: String(creator.id), customerId: String(customer.id), productId: String(product.id) } });
+        await db.update(orders).set({ stripeCheckoutSessionId: checkout.id }).where(eq(orders.id, orderId));
+        return { kind: "product" as const, orderId, checkoutUrl: checkout.url, productName: product.name };
       }
       const plan = (await db.select().from(membershipPlans).where(and(eq(membershipPlans.id, input.membershipPlanId!), eq(membershipPlans.creatorId, creator.id), eq(membershipPlans.status, "published"))).limit(1))[0];
       if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "Membership is unavailable" });
-      const orderResult = await db.insert(orders).values({ creatorId: creator.id, customerId: customer.id, orderNumber: mvpOrderNumber(), ...mvpPaidOrder(), total: plan.price });
+      const orderResult = await db.insert(orders).values({ creatorId: creator.id, customerId: customer.id, orderNumber: mvpOrderNumber(), status: "pending", total: plan.price });
       const orderId = Number(orderResult[0].insertId);
       await db.insert(orderItems).values({ orderId, membershipPlanId: plan.id, title: plan.name, unitPrice: plan.price });
-      await db.insert(subscriptions).values({ planId: plan.id, customerId: customer.id, ...mvpActiveMembership() }).onDuplicateKeyUpdate({ set: mvpActiveMembership() });
-      return { kind: "membership" as const, orderId, orderNumber: (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0]!.orderNumber, planName: plan.name };
+      const checkout = await stripeProvider.createCheckout({ orderId, customerEmail: customer.email, title: plan.name, amount: String(plan.price), currency: "USD", mode: "subscription", successUrl: `${origin}/c/${input.handle}?checkout=success&session_id={CHECKOUT_SESSION_ID}`, cancelUrl: `${origin}/c/${input.handle}?checkout=cancelled`, metadata: { creatorId: String(creator.id), customerId: String(customer.id), membershipPlanId: String(plan.id) } });
+      await db.update(orders).set({ stripeCheckoutSessionId: checkout.id }).where(eq(orders.id, orderId));
+      return { kind: "membership" as const, orderId, checkoutUrl: checkout.url, planName: plan.name };
     }),
-    book: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), serviceId: z.number().int(), slotId: z.number().int().optional(), email: z.string().email(), name: z.string().max(255).optional() })).mutation(async ({ input }) => {
+    book: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), serviceId: z.number().int(), slotId: z.number().int().optional(), email: z.string().email(), name: z.string().max(255).optional() })).mutation(async ({ input, ctx }) => {
       const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator) throw new TRPCError({ code: "NOT_FOUND" });
       const service = (await db.select().from(services).where(and(eq(services.id, input.serviceId), eq(services.creatorId, creator.id), eq(services.status, "published"))).limit(1))[0]; if (!service) throw new TRPCError({ code: "NOT_FOUND" });
       if (input.slotId) { const slot = (await db.select().from(availabilitySlots).where(and(eq(availabilitySlots.id, input.slotId), eq(availabilitySlots.serviceId, service.id), eq(availabilitySlots.isBooked, false))).limit(1))[0]; if (!slot) throw new TRPCError({ code: "CONFLICT", message: "That time is no longer available" }); await db.update(availabilitySlots).set({ isBooked: true }).where(eq(availabilitySlots.id, slot.id)); }
-      const customer = await getOrCreateCustomer(db, creator.id, input.email, input.name); const result = await db.insert(appointments).values({ serviceId: service.id, customerId: customer.id, slotId: input.slotId ?? null, ...mvpConfirmedBooking() }); return { appointmentId: Number(result[0].insertId), serviceName: service.name };
+      const customer = await getOrCreateCustomer(db, creator.id, input.email, input.name, false, ctx.user?.normalizedEmail === input.email.trim().toLowerCase() ? ctx.user.id : undefined); const result = await db.insert(appointments).values({ serviceId: service.id, customerId: customer.id, slotId: input.slotId ?? null, ...mvpConfirmedBooking() }); await sendEmail({ to: customer.email, ...emailTemplates.booking(customer.name || "there", service.name) }, { kind: "booking_confirmation", creatorId: creator.id, customerId: customer.id }); return { appointmentId: Number(result[0].insertId), serviceName: service.name };
     }),
     courseDetail: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), courseId: z.number().int() })).query(async ({ input }) => { const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator) throw new TRPCError({ code: "NOT_FOUND" }); const course = (await db.select().from(courses).where(and(eq(courses.id, input.courseId), eq(courses.creatorId, creator.id), eq(courses.status, "published"))).limit(1))[0]; if (!course) throw new TRPCError({ code: "NOT_FOUND" }); return { course, lessons: await db.select().from(lessons).where(eq(lessons.courseId, course.id)).orderBy(lessons.sortOrder) }; }),
-    completeLesson: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), courseId: z.number().int(), lessonId: z.number().int(), email: z.string().email(), name: z.string().max(255).optional() })).mutation(async ({ input }) => { const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator) throw new TRPCError({ code: "NOT_FOUND" }); const course = (await db.select().from(courses).where(and(eq(courses.id, input.courseId), eq(courses.creatorId, creator.id), eq(courses.status, "published"))).limit(1))[0]; if (!course) throw new TRPCError({ code: "NOT_FOUND" }); const lesson = (await db.select().from(lessons).where(and(eq(lessons.id, input.lessonId), eq(lessons.courseId, course.id))).limit(1))[0]; if (!lesson) throw new TRPCError({ code: "NOT_FOUND" }); const customer = await getOrCreateCustomer(db, creator.id, input.email, input.name); const enrollment = (await db.select().from(enrollments).where(and(eq(enrollments.courseId, course.id), eq(enrollments.customerId, customer.id))).limit(1))[0]; const prior = enrollment?.completedLessonIds ?? []; const completed = mergeCompletedLesson(prior, lesson.id); if (enrollment) await db.update(enrollments).set({ completedLessonIds: completed, completedAt: completed.length === (await db.select({ id: lessons.id }).from(lessons).where(eq(lessons.courseId, course.id))).length ? new Date() : null }).where(eq(enrollments.id, enrollment.id)); else await db.insert(enrollments).values({ courseId: course.id, customerId: customer.id, completedLessonIds: completed }); return { completedLessonIds: completed }; }),
+    completeLesson: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), courseId: z.number().int(), lessonId: z.number().int(), email: z.string().email(), name: z.string().max(255).optional() })).mutation(async ({ input, ctx }) => { const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator) throw new TRPCError({ code: "NOT_FOUND" }); const course = (await db.select().from(courses).where(and(eq(courses.id, input.courseId), eq(courses.creatorId, creator.id), eq(courses.status, "published"))).limit(1))[0]; if (!course) throw new TRPCError({ code: "NOT_FOUND" }); const lesson = (await db.select().from(lessons).where(and(eq(lessons.id, input.lessonId), eq(lessons.courseId, course.id))).limit(1))[0]; if (!lesson) throw new TRPCError({ code: "NOT_FOUND" }); const customer = await getOrCreateCustomer(db, creator.id, input.email, input.name, false, ctx.user?.normalizedEmail === input.email.trim().toLowerCase() ? ctx.user.id : undefined); const enrollment = (await db.select().from(enrollments).where(and(eq(enrollments.courseId, course.id), eq(enrollments.customerId, customer.id))).limit(1))[0]; const prior = enrollment?.completedLessonIds ?? []; const completed = mergeCompletedLesson(prior, lesson.id); if (enrollment) await db.update(enrollments).set({ completedLessonIds: completed, completedAt: completed.length === (await db.select({ id: lessons.id }).from(lessons).where(eq(lessons.courseId, course.id))).length ? new Date() : null }).where(eq(enrollments.id, enrollment.id)); else await db.insert(enrollments).values({ courseId: course.id, customerId: customer.id, completedLessonIds: completed }); return { completedLessonIds: completed }; }),
   }),
   admin: router({
     overview: adminProcedure.query(() => getAdminSummary()),
+    configuration: adminProcedure.query(() => ({ stripe: stripeStatus(), smtp: smtpStatus() })),
+    operations: adminProcedure.query(async () => { const db = await requireDb(); const [recentUsers, recentCreators, recentProducts, recentOrders, recentSubscriptions, recentPayments, recentTickets] = await Promise.all([db.select().from(users).orderBy(desc(users.createdAt)).limit(50), db.select().from(creators).orderBy(desc(creators.createdAt)).limit(50), db.select().from(products).orderBy(desc(products.createdAt)).limit(50), db.select().from(orders).orderBy(desc(orders.createdAt)).limit(50), db.select().from(subscriptions).orderBy(desc(subscriptions.createdAt)).limit(50), db.select().from(paymentEvents).orderBy(desc(paymentEvents.createdAt)).limit(50), db.select().from(supportTickets).orderBy(desc(supportTickets.createdAt)).limit(50)]); return { users: recentUsers.map(({ passwordHash, ...user }) => user), creators: recentCreators, products: recentProducts, orders: recentOrders, subscriptions: recentSubscriptions, payments: recentPayments, support: recentTickets }; }),
+    sessions: adminProcedure.query(async () => { const db = await requireDb(); return db.select().from(userSessions).innerJoin(users, eq(userSessions.userId, users.id)).orderBy(desc(userSessions.createdAt)).limit(100); }),
+    revokeSession: adminProcedure.input(z.object({ id: z.string().min(12).max(64) })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const session = (await db.select().from(userSessions).where(eq(userSessions.id, input.id)).limit(1))[0]; if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Session not found." }); await db.update(userSessions).set({ revokedAt: new Date() }).where(eq(userSessions.id, input.id)); await db.insert(auditLogs).values({ actorUserId: ctx.user.id, action: "admin.session.revoked", entityType: "session", entityId: input.id, ipAddress: ctx.req.ip || null, metadata: { userId: session.userId } }); return { success: true }; }),
+    auditEvents: adminProcedure.query(async () => { const db = await requireDb(); return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(100); }),
+    emailDeliveries: adminProcedure.query(async () => { const db = await requireDb(); return db.select().from(emailDeliveries).orderBy(desc(emailDeliveries.createdAt)).limit(100); }),
+    users: adminProcedure.input(z.object({ query: z.string().max(120).optional(), status: z.enum(["pending", "active", "suspended"]).optional() })).query(async ({ input }) => {
+      const db = await requireDb();
+      let rows = await db.select().from(users).orderBy(desc(users.createdAt)).limit(100);
+      if (input.status) rows = rows.filter((user) => user.accountStatus === input.status);
+      if (input.query?.trim()) { const query = input.query.trim().toLowerCase(); rows = rows.filter((user) => [user.name, user.email, user.username].some((value) => value?.toLowerCase().includes(query))); }
+      return rows.map(({ passwordHash, ...user }) => user);
+    }),
+    updateUserStatus: adminProcedure.input(z.object({ id: z.number().int(), accountStatus: z.enum(["pending", "active", "suspended"]) })).mutation(async ({ ctx, input }) => {
+      if (ctx.user.id === input.id && input.accountStatus === "suspended") throw new TRPCError({ code: "BAD_REQUEST", message: "You cannot suspend your own account." });
+      const db = await requireDb();
+      await db.update(users).set({ accountStatus: input.accountStatus }).where(eq(users.id, input.id));
+      await db.insert(auditLogs).values({ actorUserId: ctx.user.id, action: `admin.user.${input.accountStatus}`, entityType: "user", entityId: String(input.id), ipAddress: ctx.req.ip || null });
+      return { success: true };
+    }),
     tickets: adminProcedure.query(async () => { const db = await requireDb(); return db.select().from(supportTickets).orderBy(desc(supportTickets.createdAt)); }),
     updateTicket: adminProcedure.input(z.object({ id: z.number().int(), status: z.enum(["open", "in_progress", "resolved"]) })).mutation(async ({ input }) => { const db = await requireDb(); await db.update(supportTickets).set({ status: input.status }).where(eq(supportTickets.id, input.id)); return { success: true }; }),
   }),
