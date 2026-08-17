@@ -1,0 +1,1 @@
+ALTER TABLE `services` ADD `reminderLeadHours` int DEFAULT 24 NOT NULL;

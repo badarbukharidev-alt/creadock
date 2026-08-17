@@ -51,6 +51,7 @@ describe("transactional templates", () => {
   it("creates a professional purchase confirmation", () => expect(emailTemplates.purchase("Avery", "Creator Kit").subject).toContain("purchase"));
   it("creates a gated-product delivery call to action", () => expect(emailTemplates.delivery("Avery", "Creator Kit", "https://access.example/file").html).toContain("Access your product"));
   it("creates a booking confirmation", () => expect(emailTemplates.booking("Avery", "Office hours").subject).toContain("booking"));
+  it("creates a booking reminder with the appointment details", () => expect(emailTemplates.bookingReminder("Avery", "Office hours", new Date("2030-01-01T10:00:00Z"), "Video room").text).toContain("Video room"));
   it("creates a membership confirmation", () => expect(emailTemplates.membership("Avery", "Studio").text).toContain("Studio"));
 });
 

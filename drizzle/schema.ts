@@ -332,10 +332,11 @@ export const enrollments = mysqlTable("enrollments", {
   id: int("id").autoincrement().primaryKey(),
   courseId: int("courseId").notNull().references(() => courses.id, { onDelete: "cascade" }),
   customerId: int("customerId").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  membershipPlanId: int("membershipPlanId").references(() => membershipPlans.id, { onDelete: "set null" }),
   completedLessonIds: json("completedLessonIds").$type<number[]>().notNull(),
   enrolledAt: timestamp("enrolledAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
-}, (table) => [uniqueIndex("enrollments_course_customer_idx").on(table.courseId, table.customerId)]);
+}, (table) => [uniqueIndex("enrollments_course_customer_idx").on(table.courseId, table.customerId), index("enrollments_membership_plan_idx").on(table.membershipPlanId)]);
 
 export const lessonQuizAttempts = mysqlTable("lessonQuizAttempts", {
   id: int("id").autoincrement().primaryKey(),
@@ -361,8 +362,16 @@ export const services = mysqlTable("services", {
   creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
+  sessionType: mysqlEnum("sessionType", ["one_to_one", "group"]).default("one_to_one").notNull(),
   durationMinutes: int("durationMinutes").default(30).notNull(),
+  bufferMinutes: int("bufferMinutes").default(0).notNull(),
   capacity: int("capacity").default(1).notNull(),
+  timezone: varchar("timezone", { length: 80 }).default("UTC").notNull(),
+  locationType: mysqlEnum("locationType", ["online", "in_person", "phone", "custom"]).default("online").notNull(),
+  locationDetails: varchar("locationDetails", { length: 1024 }),
+  intakeQuestions: json("intakeQuestions").$type<Array<{ id: string; label: string; required?: boolean; type?: "short_text" | "long_text" | "select"; options?: string[] }>>(),
+  bookingNoticeHours: int("bookingNoticeHours").default(0).notNull(),
+  reminderLeadHours: int("reminderLeadHours").default(24).notNull(),
   price: decimal("price", { precision: 10, scale: 2 }).default("0.00").notNull(),
   status: mysqlEnum("status", ["draft", "published"]).default("draft").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -374,6 +383,7 @@ export const availabilitySlots = mysqlTable("availabilitySlots", {
   serviceId: int("serviceId").notNull().references(() => services.id, { onDelete: "cascade" }),
   startsAt: timestamp("startsAt").notNull(),
   endsAt: timestamp("endsAt").notNull(),
+  reservedCount: int("reservedCount").default(0).notNull(),
   isBooked: boolean("isBooked").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, (table) => [index("availability_service_starts_idx").on(table.serviceId, table.startsAt)]);
@@ -385,8 +395,24 @@ export const appointments = mysqlTable("appointments", {
   slotId: int("slotId").references(() => availabilitySlots.id, { onDelete: "set null" }),
   status: mysqlEnum("status", ["pending", "confirmed", "cancelled", "completed"]).default("pending").notNull(),
   meetingUrl: varchar("meetingUrl", { length: 1024 }),
+  intakeResponses: json("intakeResponses").$type<Record<string, string>>(),
+  customerTimezone: varchar("customerTimezone", { length: 80 }),
+  creatorNotes: text("creatorNotes"),
+  cancelledAt: timestamp("cancelledAt"),
+  reminderAt: timestamp("reminderAt"),
+  reminderSentAt: timestamp("reminderSentAt"),
+  reminderScheduleTaskUid: varchar("reminderScheduleTaskUid", { length: 65 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => [index("appointments_service_idx").on(table.serviceId)]);
+}, (table) => [index("appointments_service_idx").on(table.serviceId), index("appointments_reminder_task_idx").on(table.reminderScheduleTaskUid)]);
+
+export const bookingBlackouts = mysqlTable("bookingBlackouts", {
+  id: int("id").autoincrement().primaryKey(),
+  serviceId: int("serviceId").notNull().references(() => services.id, { onDelete: "cascade" }),
+  startsAt: timestamp("startsAt").notNull(),
+  endsAt: timestamp("endsAt").notNull(),
+  reason: varchar("reason", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("booking_blackouts_service_time_idx").on(table.serviceId, table.startsAt)]);
 
 export const membershipPlans = mysqlTable("membershipPlans", {
   id: int("id").autoincrement().primaryKey(),
@@ -394,6 +420,7 @@ export const membershipPlans = mysqlTable("membershipPlans", {
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   benefits: json("benefits").$type<string[]>().notNull(),
+  accessRules: json("accessRules").$type<{ includedProductIds?: number[]; includedCourseIds?: number[]; includedCommunityIds?: number[]; exclusiveContent?: string }>(),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
   interval: mysqlEnum("interval", ["month", "year"]).default("month").notNull(),
   status: mysqlEnum("status", ["draft", "published", "archived"]).default("draft").notNull(),
@@ -412,6 +439,56 @@ export const subscriptions = mysqlTable("subscriptions", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => [index("subscriptions_customer_idx").on(table.customerId), index("subscriptions_plan_idx").on(table.planId)]);
+
+export const communitySpaces = mysqlTable("communitySpaces", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 180 }).notNull(),
+  description: text("description"),
+  accessType: mysqlEnum("accessType", ["public", "members", "product"]).default("members").notNull(),
+  membershipPlanId: int("membershipPlanId").references(() => membershipPlans.id, { onDelete: "set null" }),
+  productId: int("productId").references(() => products.id, { onDelete: "set null" }),
+  isPublished: boolean("isPublished").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("community_spaces_creator_idx").on(table.creatorId), index("community_spaces_access_idx").on(table.accessType, table.isPublished)]);
+
+export const communityMembers = mysqlTable("communityMembers", {
+  id: int("id").autoincrement().primaryKey(),
+  communityId: int("communityId").notNull().references(() => communitySpaces.id, { onDelete: "cascade" }),
+  customerId: int("customerId").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  role: mysqlEnum("role", ["member", "moderator"]).default("member").notNull(),
+  status: mysqlEnum("status", ["active", "removed"]).default("active").notNull(),
+  joinedAt: timestamp("joinedAt").defaultNow().notNull(),
+}, (table) => [uniqueIndex("community_members_community_customer_idx").on(table.communityId, table.customerId), index("community_members_customer_idx").on(table.customerId, table.status)]);
+
+export const communityPosts = mysqlTable("communityPosts", {
+  id: int("id").autoincrement().primaryKey(),
+  communityId: int("communityId").notNull().references(() => communitySpaces.id, { onDelete: "cascade" }),
+  authorCustomerId: int("authorCustomerId").references(() => customers.id, { onDelete: "set null" }),
+  authorUserId: int("authorUserId").references(() => users.id, { onDelete: "set null" }),
+  title: varchar("title", { length: 255 }),
+  body: text("body").notNull(),
+  isAnnouncement: boolean("isAnnouncement").default(false).notNull(),
+  status: mysqlEnum("status", ["published", "hidden"]).default("published").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("community_posts_feed_idx").on(table.communityId, table.createdAt), index("community_posts_author_idx").on(table.authorCustomerId)]);
+
+export const communityComments = mysqlTable("communityComments", {
+  id: int("id").autoincrement().primaryKey(),
+  postId: int("postId").notNull().references(() => communityPosts.id, { onDelete: "cascade" }),
+  authorCustomerId: int("authorCustomerId").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("community_comments_post_idx").on(table.postId, table.createdAt)]);
+
+export const communityPostLikes = mysqlTable("communityPostLikes", {
+  id: int("id").autoincrement().primaryKey(),
+  postId: int("postId").notNull().references(() => communityPosts.id, { onDelete: "cascade" }),
+  customerId: int("customerId").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [uniqueIndex("community_post_likes_post_customer_idx").on(table.postId, table.customerId), index("community_post_likes_post_idx").on(table.postId)]);
 
 export const orders = mysqlTable("orders", {
   id: int("id").autoincrement().primaryKey(),
@@ -494,7 +571,7 @@ export const emailDeliveries = mysqlTable("emailDeliveries", {
   userId: int("userId").references(() => users.id, { onDelete: "set null" }),
   customerId: int("customerId").references(() => customers.id, { onDelete: "set null" }),
   campaignId: int("campaignId").references(() => emailCampaigns.id, { onDelete: "set null" }),
-  kind: mysqlEnum("kind", ["verification", "password_reset", "welcome", "purchase_confirmation", "product_delivery", "booking_confirmation", "membership_confirmation", "broadcast"]).notNull(),
+  kind: mysqlEnum("kind", ["verification", "password_reset", "welcome", "purchase_confirmation", "product_delivery", "booking_confirmation", "booking_reminder", "membership_confirmation", "broadcast"]).notNull(),
   recipient: varchar("recipient", { length: 320 }).notNull(),
   subject: varchar("subject", { length: 255 }).notNull(),
   status: mysqlEnum("status", ["queued", "sent", "failed", "bounced", "unsubscribed"]).default("queued").notNull(),

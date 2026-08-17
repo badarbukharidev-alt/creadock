@@ -33,6 +33,7 @@ import {
   Link2,
   LogOut,
   Mail,
+  MessageCircle,
   Package,
   Settings2,
   SlidersHorizontal,
@@ -72,6 +73,7 @@ const groups: Array<{ label?: string; items: NavItem[] }> = [
     label: "Audience",
     items: [
       { label: "Customers", path: "/app/customers", icon: Users },
+      { label: "Community", path: "/app/community", icon: MessageCircle },
       { label: "Email", path: "/app/email", icon: Mail },
       { label: "Analytics", path: "/app/analytics", icon: BarChart3 },
     ],

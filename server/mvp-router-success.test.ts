@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
-import { appointments, courses, customers, digitalEntitlements, emailCampaigns, emailDeliveries, enrollments, lessons, membershipPlans, orderItems, orders, products, services, subscriptions } from "../drizzle/schema";
+import { appointments, availabilitySlots, courses, customers, digitalEntitlements, emailCampaigns, emailDeliveries, enrollments, lessons, membershipPlans, orderItems, orders, products, services, subscriptions } from "../drizzle/schema";
 
 const state = vi.hoisted(() => ({
   rows: new Map<unknown, Array<Record<string, unknown>>>(),
@@ -55,6 +55,9 @@ vi.mock("./payments", () => ({
   stripeStatus: () => ({ configured: true }),
 }));
 
+const createHeartbeatJob = vi.hoisted(() => vi.fn(async () => ({ taskUid: "task-appointment-12" })));
+vi.mock("./_core/heartbeat", () => ({ createHeartbeatJob }));
+
 const { appRouter } = await import("./routers");
 
 function creatorContext(): TrpcContext {
@@ -95,6 +98,19 @@ describe("CreaDock commerce router success paths", () => {
     expect(result).toMatchObject({ serviceName: "Office hours" });
     expect(state.inserts.some((entry) => entry.table === appointments && (entry.values as { status: string }).status === "confirmed")).toBe(true);
     expect(state.inserts.some((entry) => entry.table === emailDeliveries && (entry.values as { kind: string }).kind === "booking_confirmation")).toBe(true);
+  });
+
+  it("schedules an appointment reminder and stores its task identifier for a future booked slot in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    state.rows.set(services, [{ id: 4, creatorId: 1, name: "Office hours", status: "published", bookingNoticeHours: 0, reminderLeadHours: 24, capacity: 1, locationType: "online", locationDetails: "https://meet.example/office" }]);
+    state.rows.set(availabilitySlots, [{ id: 8, serviceId: 4, startsAt: new Date("2030-02-02T12:00:00Z"), endsAt: new Date("2030-02-02T13:00:00Z"), reservedCount: 0, isBooked: false }]);
+    state.rows.set(customers, []);
+
+    await appRouter.createCaller(creatorContext()).storefront.book({ handle: "creator", serviceId: 4, slotId: 8, email: "guest@example.com" });
+
+    expect(createHeartbeatJob).toHaveBeenCalledWith(expect.objectContaining({ name: "appointment-reminder-11", path: "/api/scheduled/appointmentReminder" }), "");
+    expect(state.updates).toContainEqual(expect.objectContaining({ table: appointments, values: { reminderScheduleTaskUid: "task-appointment-12" } }));
+    vi.unstubAllEnvs();
   });
 
   it("persists completed course lesson progress", async () => {

@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { courses, customers, digitalEntitlements, emailDeliveries, enrollments, membershipPlans, orderItems, orders, paymentEvents, products, subscriptions } from "../drizzle/schema";
 import { getDb } from "./db";
 import { emailTemplates, sendEmail } from "./email";
@@ -33,6 +33,8 @@ async function completeOrder(orderId: number, paymentIntentId: string | null, st
       const plan = (await db.select().from(membershipPlans).where(eq(membershipPlans.id, item.membershipPlanId)).limit(1))[0];
       if (plan) {
         await db.insert(subscriptions).values({ planId: plan.id, customerId: customer.id, stripeSubscriptionId, status: "active" }).onDuplicateKeyUpdate({ set: { status: "active", stripeSubscriptionId } });
+        const includedCourseIds = plan.accessRules?.includedCourseIds ?? [];
+        if (includedCourseIds.length) { const includedCourses = await db.select().from(courses).where(and(eq(courses.creatorId, order.creatorId), inArray(courses.id, includedCourseIds))); for (const course of includedCourses) await db.insert(enrollments).values({ courseId: course.id, customerId: customer.id, membershipPlanId: plan.id, completedLessonIds: [] }).onDuplicateKeyUpdate({ set: { membershipPlanId: plan.id } }); }
         await sendEmail({ to: customer.email, ...emailTemplates.membership(customer.name || "there", plan.name) }, { kind: "membership_confirmation", creatorId: order.creatorId, customerId: customer.id });
       }
     }

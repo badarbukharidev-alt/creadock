@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { emailDeliveries } from "../drizzle/schema";
 import { getDb } from "./db";
 
-type EmailKind = "verification" | "password_reset" | "welcome" | "purchase_confirmation" | "product_delivery" | "booking_confirmation" | "membership_confirmation" | "broadcast";
+type EmailKind = "verification" | "password_reset" | "welcome" | "purchase_confirmation" | "product_delivery" | "booking_confirmation" | "booking_reminder" | "membership_confirmation" | "broadcast";
 type EmailMessage = { to: string; subject: string; html: string; text: string };
 type DeliveryContext = { creatorId?: number | null; userId?: number | null; customerId?: number | null; campaignId?: number | null; kind: EmailKind };
 
@@ -36,6 +36,7 @@ export const emailTemplates = {
   purchase: (name: string, item: string) => ({ subject: "Your CreaDock purchase is confirmed", text: `Hi ${name}, your purchase of ${item} is confirmed.`, html: emailLayout("Purchase confirmed", `<p>Hi ${safeText(name)},</p><p>Your purchase of <strong>${safeText(item)}</strong> is confirmed.</p>`) }),
   delivery: (name: string, item: string, href: string) => ({ subject: "Your product is ready", text: `Hi ${name}, download ${item}: ${href}`, html: emailLayout("Your product is ready", `<p>Hi ${safeText(name)},</p><p>Your purchase of <strong>${safeText(item)}</strong> is ready to access.</p>`, { label: "Access your product", href }) }),
   booking: (name: string, service: string) => ({ subject: "Your booking is confirmed", text: `Hi ${name}, your booking for ${service} is confirmed.`, html: emailLayout("Booking confirmed", `<p>Hi ${safeText(name)},</p><p>Your booking for <strong>${safeText(service)}</strong> is confirmed.</p>`) }),
+  bookingReminder: (name: string, service: string, startsAt: Date, location?: string | null) => ({ subject: `Reminder: ${service} is coming up`, text: `Hi ${name}, your ${service} appointment is scheduled for ${startsAt.toLocaleString()}${location ? `. Location: ${location}` : ""}.`, html: emailLayout("Your appointment is coming up", `<p>Hi ${safeText(name)},</p><p>Your <strong>${safeText(service)}</strong> appointment is scheduled for <strong>${safeText(startsAt.toLocaleString())}</strong>.</p>${location ? `<p>Location or meeting details: ${safeText(location)}</p>` : ""}`) }),
   membership: (name: string, plan: string) => ({ subject: "Your membership is confirmed", text: `Hi ${name}, your ${plan} membership is active.`, html: emailLayout("Membership confirmed", `<p>Hi ${safeText(name)},</p><p>Your <strong>${safeText(plan)}</strong> membership is active.</p>`) }),
 };
 

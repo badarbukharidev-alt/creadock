@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
-import { bundleItems, coupons, courseModules, courses, creatorLinks, creatorPages, creators, lessons, mediaAssets, mediaFolders, pageBlocks, productBundles, productVariants, products, storefrontBlocks } from "../drizzle/schema";
+import { bookingBlackouts, bundleItems, communityPosts, communitySpaces, coupons, courseModules, courses, creatorLinks, creatorPages, creators, lessons, mediaAssets, mediaFolders, membershipPlans, pageBlocks, productBundles, productVariants, products, services, storefrontBlocks } from "../drizzle/schema";
 
 const state = vi.hoisted(() => ({
   rows: new Map<unknown, Array<Record<string, unknown>>>(),
@@ -93,6 +93,22 @@ describe("CreaDock creator content workflows", () => {
     expect(state.inserts.some((entry) => entry.table === creatorLinks)).toBe(true);
     expect(state.updates.filter((entry) => entry.table === creatorLinks).length).toBeGreaterThan(1);
     expect(state.deletes).toContainEqual({ table: creatorLinks });
+  });
+
+  it("persists booking safeguards, membership access rules, and a community announcement", async () => {
+    state.rows.set(services, [{ id: 90, creatorId: 1, name: "Consultation", status: "published" }]);
+    state.rows.set(communitySpaces, [{ id: 91, creatorId: 1, name: "Member circle", accessType: "public", isPublished: true }]);
+    const caller = appRouter.createCaller(creatorContext());
+    await caller.bookings.updateService({ id: 90, name: "Consultation", description: "A focused session", sessionType: "one_to_one", durationMinutes: 45, bufferMinutes: 15, capacity: 1, timezone: "Asia/Karachi", locationType: "online", locationDetails: "https://meet.example.com/room", intakeQuestions: [{ id: "goal", label: "What is your goal?", type: "short_text" }], bookingNoticeHours: 24, reminderLeadHours: 3, price: "75", status: "published" });
+    await caller.bookings.addBlackout({ serviceId: 90, startsAt: new Date("2030-01-01T10:00:00Z"), endsAt: new Date("2030-01-01T11:00:00Z"), reason: "Offsite" });
+    await caller.memberships.create({ name: "Pro", benefits: ["Community"], accessRules: { includedCommunityIds: [91], exclusiveContent: "Monthly office hours" }, price: "12", interval: "month", status: "published" });
+    await caller.community.saveSpace({ name: "Public circle", accessType: "public", isPublished: true });
+    await caller.community.createAnnouncement({ communityId: 91, title: "Welcome", body: "Our first member update." });
+    expect(state.updates).toContainEqual(expect.objectContaining({ table: services, values: expect.objectContaining({ bufferMinutes: 15, bookingNoticeHours: 24, reminderLeadHours: 3, timezone: "Asia/Karachi" }) }));
+    expect(state.inserts).toContainEqual(expect.objectContaining({ table: bookingBlackouts, values: expect.objectContaining({ serviceId: 90, reason: "Offsite" }) }));
+    expect(state.inserts).toContainEqual(expect.objectContaining({ table: membershipPlans, values: expect.objectContaining({ accessRules: expect.objectContaining({ includedCommunityIds: [91] }) }) }));
+    expect(state.inserts).toContainEqual(expect.objectContaining({ table: communitySpaces, values: expect.objectContaining({ creatorId: 1, name: "Public circle" }) }));
+    expect(state.inserts).toContainEqual(expect.objectContaining({ table: communityPosts, values: expect.objectContaining({ communityId: 91, isAnnouncement: true, title: "Welcome" }) }));
   });
 
   it("persists a visual storefront system, template blocks, and creator-owned block order", async () => {

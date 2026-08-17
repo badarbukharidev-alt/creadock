@@ -12,6 +12,7 @@ import { getDb, getOrCreateCreator } from "../db";
 import { mediaAssets } from "../../drizzle/schema";
 import { storagePut } from "../storage";
 import { handleStripeWebhook } from "../stripeWebhook";
+import { handleAppointmentReminder } from "../appointmentReminder";
 import { serveStatic, setupVite } from "./vite";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -85,6 +86,7 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.post("/api/scheduled/appointmentReminder", handleAppointmentReminder);
   registerStorageProxy(app);
   // tRPC API
   app.use(

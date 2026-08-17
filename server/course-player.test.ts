@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
-import { courseModules, customers, enrollments, lessonQuizAttempts, lessons, mediaAssets } from "../drizzle/schema";
+import { courseModules, customers, enrollments, lessonQuizAttempts, lessons, mediaAssets, subscriptions } from "../drizzle/schema";
 
 const state = vi.hoisted(() => ({
   rows: new Map<unknown, Array<Record<string, unknown>>>(),
@@ -69,5 +69,15 @@ describe("authenticated course player", () => {
     const player = await appRouter.createCaller(studentContext()).account.course({ courseId: 5 });
 
     expect(player.lessons[0]?.availability).toMatchObject({ isAvailable: false, reason: "This lesson is scheduled for later." });
+  });
+
+  it("denies a membership-sourced course enrollment as soon as its linked plan is no longer active", async () => {
+    state.rows.set(enrollments, [{ ...enrolledCourse(), enrollments: { ...enrolledCourse().enrollments, membershipPlanId: 44 } }]);
+    state.rows.set(subscriptions, []);
+
+    await expect(appRouter.createCaller(studentContext()).account.course({ courseId: 5 })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "This course is available while the associated membership remains active.",
+    });
   });
 });

@@ -1,0 +1,1 @@
+ALTER TABLE `emailDeliveries` MODIFY COLUMN `kind` enum('verification','password_reset','welcome','purchase_confirmation','product_delivery','booking_confirmation','booking_reminder','membership_confirmation','broadcast') NOT NULL;

@@ -110,3 +110,22 @@
 - [x] Add creator-workflow regression assertions for rich lesson thumbnail, gallery, and duration persistence.
 - [x] Add a focused Course Builder UI or mutation-payload regression for thumbnail, gallery, and duration controls.
 - [x] Add a focused Course Builder client regression that drives thumbnail, gallery, and duration settings into the lesson mutation payload.
+- [x] Add additive data models and migrations for creator booking intake questions, booking locations or conferencing details, membership access rules, and gated community spaces or posts.
+- [x] Upgrade creator booking management with service-level intake forms, availability safeguards, attendee and appointment status controls, reminders, and live booking details.
+- [x] Expand membership plans with access benefits, member administration, protected content rules, and cancellation-safe entitlement behavior.
+- [x] Build a real creator-owned community workspace with spaces, posts, membership-gated access, and authenticated member participation.
+- [x] Add booking, membership, and community authorization regressions, then validate protected public and account routes responsively.
+- [x] Build the authenticated member community feed route with join, post, comment, and like participation controls.
+- [x] Add member community access and interaction authorization regression coverage for public, membership, product, and removed-member cases.
+- [x] Implement real booking reminder scheduling and delivery records with focused regression coverage.
+- [x] Enforce membership access rules across included products, courses, and communities, including cancellation-safe protected-content regressions.
+- [x] Default each creator booking service to a 24-hour reminder lead time and expose creator-selectable 1-hour, 3-hour, 24-hour, and 48-hour reminder options.
+- [x] Create membership-sourced course enrollments for included-course benefits and block those enrollments immediately when their plan is no longer active.
+- [x] Add focused Stripe membership-fulfillment regression coverage for creating included-course enrollment records.
+- [x] Render member comments and likes in the authenticated community feed and expose member post, comment, and reaction interactions end to end.
+- [ ] Activate appointment reminder jobs after the published callback is deployed, and record a successful scheduled reminder delivery against a real appointment.
+- [x] Add regressions for included-product, included-course, included-community, and cancelled-membership denial paths.
+- [x] Add a focused authenticated member-community client regression for rendered comments, reply submission, and like state.
+- [x] Return explicit public-space member status and show Join for eligible signed-in non-members before allowing community participation.
+- [x] Add a focused regression proving booking creates an appointment reminder job and persists its task identifier.
+- [x] Add a focused regression proving successful appointment reminders persist a booking_reminder email delivery record.
