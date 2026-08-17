@@ -93,6 +93,79 @@ export const storefrontBlocks = mysqlTable("storefrontBlocks", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => [index("storefront_blocks_creator_idx").on(table.creatorId, table.sortOrder)]);
 
+export const mediaFolders = mysqlTable("mediaFolders", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  parentId: int("parentId"),
+  name: varchar("name", { length: 160 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("media_folders_creator_idx").on(table.creatorId), index("media_folders_parent_idx").on(table.parentId)]);
+
+export const mediaAssets = mysqlTable("mediaAssets", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  folderId: int("folderId").references(() => mediaFolders.id, { onDelete: "set null" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  fileKey: varchar("fileKey", { length: 1024 }).notNull(),
+  url: varchar("url", { length: 1024 }).notNull(),
+  mimeType: varchar("mimeType", { length: 160 }).notNull(),
+  kind: mysqlEnum("kind", ["image", "video", "audio", "document", "archive", "other"]).default("other").notNull(),
+  sizeBytes: int("sizeBytes").default(0).notNull(),
+  width: int("width"),
+  height: int("height"),
+  durationSeconds: int("durationSeconds"),
+  altText: varchar("altText", { length: 320 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("media_assets_creator_idx").on(table.creatorId, table.createdAt), index("media_assets_folder_idx").on(table.folderId), index("media_assets_kind_idx").on(table.creatorId, table.kind)]);
+
+export const creatorPages = mysqlTable("creatorPages", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 180 }).notNull(),
+  slug: varchar("slug", { length: 180 }).notNull(),
+  kind: mysqlEnum("kind", ["home", "links", "about", "products", "services", "courses", "contact", "custom"]).default("custom").notNull(),
+  template: mysqlEnum("template", ["creator", "coach", "consultant", "educator", "artist", "agency", "products", "newsletter"]).default("creator").notNull(),
+  status: mysqlEnum("status", ["draft", "published"]).default("draft").notNull(),
+  seoTitle: varchar("seoTitle", { length: 180 }),
+  seoDescription: varchar("seoDescription", { length: 320 }),
+  socialImageAssetId: int("socialImageAssetId").references(() => mediaAssets.id, { onDelete: "set null" }),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [uniqueIndex("creator_pages_creator_slug_idx").on(table.creatorId, table.slug), index("creator_pages_creator_status_idx").on(table.creatorId, table.status)]);
+
+export const pageBlocks = mysqlTable("pageBlocks", {
+  id: int("id").autoincrement().primaryKey(),
+  pageId: int("pageId").notNull().references(() => creatorPages.id, { onDelete: "cascade" }),
+  type: mysqlEnum("type", ["profile", "heading", "text", "link", "product", "productGrid", "course", "booking", "membership", "social", "image", "video", "gallery", "divider", "email", "faq", "countdown", "embed", "html"]).notNull(),
+  content: json("content").$type<Record<string, unknown>>().notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isVisible: boolean("isVisible").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("page_blocks_page_idx").on(table.pageId, table.sortOrder)]);
+
+export const creatorLinks = mysqlTable("creatorLinks", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  pageId: int("pageId").references(() => creatorPages.id, { onDelete: "set null" }),
+  title: varchar("title", { length: 180 }).notNull(),
+  url: varchar("url", { length: 2048 }).notNull(),
+  description: varchar("description", { length: 320 }),
+  icon: varchar("icon", { length: 80 }),
+  thumbnailAssetId: int("thumbnailAssetId").references(() => mediaAssets.id, { onDelete: "set null" }),
+  openInNewTab: boolean("openInNewTab").default(true).notNull(),
+  isVisible: boolean("isVisible").default(true).notNull(),
+  publishedAt: timestamp("publishedAt"),
+  expiresAt: timestamp("expiresAt"),
+  clickCount: int("clickCount").default(0).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("creator_links_creator_idx").on(table.creatorId, table.sortOrder), index("creator_links_page_idx").on(table.pageId)]);
+
 export const products = mysqlTable("products", {
   id: int("id").autoincrement().primaryKey(),
   creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),

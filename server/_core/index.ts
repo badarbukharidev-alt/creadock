@@ -2,12 +2,14 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import { eq } from "drizzle-orm";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { getFirstPartyUser } from "../auth";
-import { getOrCreateCreator } from "../db";
+import { getDb, getOrCreateCreator } from "../db";
+import { mediaAssets } from "../../drizzle/schema";
 import { storagePut } from "../storage";
 import { handleStripeWebhook } from "../stripeWebhook";
 import { serveStatic, setupVite } from "./vite";
@@ -31,6 +33,15 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
   throw new Error(`No available port found starting from ${startPort}`);
 }
 
+function mediaKind(contentType: string): "image" | "video" | "audio" | "document" | "archive" | "other" {
+  if (contentType.startsWith("image/")) return "image";
+  if (contentType.startsWith("video/")) return "video";
+  if (contentType.startsWith("audio/")) return "audio";
+  if (contentType.includes("zip") || contentType.includes("compressed")) return "archive";
+  if (contentType.includes("pdf") || contentType.includes("document") || contentType.includes("text")) return "document";
+  return "other";
+}
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
@@ -48,6 +59,26 @@ async function startServer() {
       return res.status(201).json({ ...stored, sizeBytes: req.body.length });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
+      return res.status(500).json({ error: message });
+    }
+  });
+  app.post("/api/uploads/media", express.raw({ type: "application/octet-stream", limit: "100mb" }), async (req, res) => {
+    try {
+      const user = await getFirstPartyUser(req);
+      if (!user) return res.status(401).json({ error: "Sign in to upload media" });
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: "A media file is required" });
+      const creator = await getOrCreateCreator(user);
+      const db = await getDb();
+      if (!db) return res.status(503).json({ error: "Media storage is temporarily unavailable" });
+      const rawName = typeof req.query.name === "string" ? req.query.name : "media";
+      const fileName = rawName.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 180) || "media";
+      const contentType = typeof req.headers["x-content-type"] === "string" ? req.headers["x-content-type"] : "application/octet-stream";
+      const stored = await storagePut(`creators/${creator.id}/media/${Date.now()}-${fileName}`, req.body, contentType);
+      const result = await db.insert(mediaAssets).values({ creatorId: creator.id, name: fileName, fileKey: stored.key, url: stored.url, mimeType: contentType, kind: mediaKind(contentType), sizeBytes: req.body.length });
+      const asset = (await db.select().from(mediaAssets).where(eq(mediaAssets.id, Number(result[0].insertId))).limit(1))[0];
+      return res.status(201).json(asset);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Media upload failed";
       return res.status(500).json({ error: message });
     }
   });

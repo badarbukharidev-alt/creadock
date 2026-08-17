@@ -27,7 +27,10 @@ import {
   ChevronDown,
   CircleHelp,
   CreditCard,
+  FileText,
+  Image,
   LayoutDashboard,
+  Link2,
   LogOut,
   Mail,
   Package,
@@ -44,14 +47,17 @@ type NavItem = { label: string; path: string; icon: LucideIcon; badge?: string }
 const groups: Array<{ label?: string; items: NavItem[] }> = [
   { items: [{ label: "Overview", path: "/app/dashboard", icon: LayoutDashboard }] },
   {
-    label: "My store",
+    label: "Create",
     items: [
       { label: "Storefront", path: "/app/store", icon: Store },
+      { label: "Pages", path: "/app/pages", icon: FileText },
+      { label: "Links", path: "/app/links", icon: Link2 },
+      { label: "Media", path: "/app/media", icon: Image },
       { label: "Appearance", path: "/app/appearance", icon: WandSparkles },
     ],
   },
   {
-    label: "Business",
+    label: "Sell",
     items: [
       { label: "Products", path: "/app/products", icon: Package },
       { label: "Courses", path: "/app/courses", icon: BookOpen },

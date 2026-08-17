@@ -77,3 +77,13 @@
 - [x] Prevent protected creator-dashboard queries from running until the first-party session has resolved after login.
 - [x] Eliminate the remaining premature protected API request on /app/dashboard when no first-party user session is available.
 - [x] Replace hardcoded creator public-link domains with the active application origin.
+- [x] Prepare a current live-version feature and workflow guide for CreaDock users.
+- [x] Rebuild creator information architecture with the first-class Pages, Links, and Media workspaces while preserving existing routes.
+- [x] Add persistent creator-owned media, page, and link data models with safe storage-backed operations and migrations.
+- [x] Build functional media-library, multi-page, and link-in-bio management workflows with public rendering and tests.
+- [x] Add creator media-library workflow regression coverage for persisted assets, folders, updates, removal, and listing.
+- [x] Add page-builder workflow regression coverage for page lifecycle, blocks, reordering, publication, and public retrieval.
+- [x] Add link-in-bio workflow regression coverage for link lifecycle, expiry filtering, click registration, and public rendering.
+- [x] Extend media workflow tests to cover creator-owned asset updates and folder assignment.
+- [x] Extend page workflow tests to cover new page creation and subsequent publication.
+- [x] Extend link workflow tests to cover create, reorder, removal, and rendered `/c/:handle/:slug` public links.

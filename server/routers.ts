@@ -20,11 +20,16 @@ import {
   enrollments,
   lessons,
   membershipPlans,
+  mediaAssets,
+  mediaFolders,
   orders,
   orderItems,
+  pageBlocks,
   paymentEvents,
   platformSettings,
   products,
+  creatorLinks,
+  creatorPages,
   services,
   storeVisits,
   storefrontBlocks,
@@ -79,6 +84,23 @@ const productInput = z.object({
   fileSizeBytes: z.number().int().min(0).max(2_147_483_647).optional(),
   externalUrl: z.string().url().optional().or(z.literal("")),
 });
+
+const mediaKindInput = z.enum(["image", "video", "audio", "document", "archive", "other"]);
+const pageKindInput = z.enum(["home", "links", "about", "products", "services", "courses", "contact", "custom"]);
+const pageTemplateInput = z.enum(["creator", "coach", "consultant", "educator", "artist", "agency", "products", "newsletter"]);
+const pageBlockTypeInput = z.enum(["profile", "heading", "text", "link", "product", "productGrid", "course", "booking", "membership", "social", "image", "video", "gallery", "divider", "email", "faq", "countdown", "embed", "html"]);
+
+async function requireOwnedPage(db: Awaited<ReturnType<typeof requireDb>>, creatorId: number, pageId: number) {
+  const page = (await db.select().from(creatorPages).where(and(eq(creatorPages.id, pageId), eq(creatorPages.creatorId, creatorId))).limit(1))[0];
+  if (!page) throw new TRPCError({ code: "NOT_FOUND", message: "Page not found." });
+  return page;
+}
+
+async function requireOwnedAsset(db: Awaited<ReturnType<typeof requireDb>>, creatorId: number, assetId: number) {
+  const asset = (await db.select().from(mediaAssets).where(and(eq(mediaAssets.id, assetId), eq(mediaAssets.creatorId, creatorId))).limit(1))[0];
+  if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "Media item not found." });
+  return asset;
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -147,6 +169,45 @@ export const appRouter = router({
       await db.update(creators).set(input).where(eq(creators.id, creator.id));
       return (await db.select().from(creators).where(eq(creators.id, creator.id)).limit(1))[0];
     }),
+  }),
+  media: router({
+    library: protectedProcedure.input(z.object({ kind: mediaKindInput.optional(), query: z.string().max(120).optional() }).optional()).query(async ({ ctx, input }) => {
+      const db = await requireDb(); const creator = await ownedCreator(ctx);
+      const assets = await db.select().from(mediaAssets).where(input?.kind ? and(eq(mediaAssets.creatorId, creator.id), eq(mediaAssets.kind, input.kind)) : eq(mediaAssets.creatorId, creator.id)).orderBy(desc(mediaAssets.createdAt));
+      const folders = await db.select().from(mediaFolders).where(eq(mediaFolders.creatorId, creator.id)).orderBy(mediaFolders.name);
+      return { assets: input?.query ? assets.filter((asset) => asset.name.toLowerCase().includes(input.query!.toLowerCase())) : assets, folders };
+    }),
+    createFolder: protectedProcedure.input(z.object({ name: z.string().trim().min(1).max(160), parentId: z.number().int().optional() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb(); const creator = await ownedCreator(ctx);
+      if (input.parentId) { const parent = (await db.select().from(mediaFolders).where(and(eq(mediaFolders.id, input.parentId), eq(mediaFolders.creatorId, creator.id))).limit(1))[0]; if (!parent) throw new TRPCError({ code: "NOT_FOUND", message: "Parent folder not found." }); }
+      const result = await db.insert(mediaFolders).values({ creatorId: creator.id, name: input.name, parentId: input.parentId ?? null }); return Number(result[0].insertId);
+    }),
+    updateAsset: protectedProcedure.input(z.object({ id: z.number().int(), name: z.string().trim().min(1).max(255).optional(), altText: z.string().max(320).nullable().optional(), folderId: z.number().int().nullable().optional() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb(); const creator = await ownedCreator(ctx); await requireOwnedAsset(db, creator.id, input.id);
+      if (input.folderId) { const folder = (await db.select().from(mediaFolders).where(and(eq(mediaFolders.id, input.folderId), eq(mediaFolders.creatorId, creator.id))).limit(1))[0]; if (!folder) throw new TRPCError({ code: "NOT_FOUND", message: "Folder not found." }); }
+      await db.update(mediaAssets).set({ name: input.name, altText: input.altText, folderId: input.folderId }).where(and(eq(mediaAssets.id, input.id), eq(mediaAssets.creatorId, creator.id))); return { success: true };
+    }),
+    removeAsset: protectedProcedure.input(z.object({ id: z.number().int() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); await db.delete(mediaAssets).where(and(eq(mediaAssets.id, input.id), eq(mediaAssets.creatorId, creator.id))); return { success: true }; }),
+  }),
+  pages: router({
+    list: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); return db.select().from(creatorPages).where(eq(creatorPages.creatorId, creator.id)).orderBy(creatorPages.sortOrder, desc(creatorPages.createdAt)); }),
+    save: protectedProcedure.input(z.object({ id: z.number().int().optional(), title: z.string().trim().min(2).max(180), slug: z.string().trim().min(1).max(180).regex(/^[a-z0-9-]+$/), kind: pageKindInput, template: pageTemplateInput, status: z.enum(["draft", "published"]), seoTitle: z.string().max(180).optional(), seoDescription: z.string().max(320).optional(), socialImageAssetId: z.number().int().nullable().optional() })).mutation(async ({ ctx, input }) => {
+      const db = await requireDb(); const creator = await ownedCreator(ctx); if (input.socialImageAssetId) await requireOwnedAsset(db, creator.id, input.socialImageAssetId);
+      const duplicate = (await db.select({ id: creatorPages.id }).from(creatorPages).where(and(eq(creatorPages.creatorId, creator.id), eq(creatorPages.slug, input.slug))).limit(1))[0]; if (duplicate && duplicate.id !== input.id) throw new TRPCError({ code: "CONFLICT", message: "That page URL is already in use." });
+      const payload = { ...input, socialImageAssetId: input.socialImageAssetId ?? null, seoTitle: input.seoTitle || null, seoDescription: input.seoDescription || null };
+      if (input.id) { await requireOwnedPage(db, creator.id, input.id); await db.update(creatorPages).set(payload).where(and(eq(creatorPages.id, input.id), eq(creatorPages.creatorId, creator.id))); return input.id; }
+      const count = (await db.select({ id: creatorPages.id }).from(creatorPages).where(eq(creatorPages.creatorId, creator.id))).length; const inserted = await db.insert(creatorPages).values({ ...payload, creatorId: creator.id, sortOrder: count }); return Number(inserted[0].insertId);
+    }),
+    blocks: protectedProcedure.input(z.object({ pageId: z.number().int() })).query(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); await requireOwnedPage(db, creator.id, input.pageId); return db.select().from(pageBlocks).where(eq(pageBlocks.pageId, input.pageId)).orderBy(pageBlocks.sortOrder); }),
+    saveBlock: protectedProcedure.input(z.object({ id: z.number().int().optional(), pageId: z.number().int(), type: pageBlockTypeInput, content: z.record(z.string(), z.unknown()), isVisible: z.boolean().default(true) })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); await requireOwnedPage(db, creator.id, input.pageId); if (input.id) { await db.update(pageBlocks).set({ type: input.type, content: input.content, isVisible: input.isVisible }).where(and(eq(pageBlocks.id, input.id), eq(pageBlocks.pageId, input.pageId))); return input.id; } const count = (await db.select({ id: pageBlocks.id }).from(pageBlocks).where(eq(pageBlocks.pageId, input.pageId))).length; const result = await db.insert(pageBlocks).values({ pageId: input.pageId, type: input.type, content: input.content, isVisible: input.isVisible, sortOrder: count }); return Number(result[0].insertId); }),
+    reorderBlocks: protectedProcedure.input(z.object({ pageId: z.number().int(), blockIds: z.array(z.number().int()).min(1) })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); await requireOwnedPage(db, creator.id, input.pageId); await Promise.all(input.blockIds.map((id, sortOrder) => db.update(pageBlocks).set({ sortOrder }).where(and(eq(pageBlocks.id, id), eq(pageBlocks.pageId, input.pageId))))); return { success: true }; }),
+    removeBlock: protectedProcedure.input(z.object({ pageId: z.number().int(), id: z.number().int() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); await requireOwnedPage(db, creator.id, input.pageId); await db.delete(pageBlocks).where(and(eq(pageBlocks.id, input.id), eq(pageBlocks.pageId, input.pageId))); return { success: true }; }),
+  }),
+  links: router({
+    list: protectedProcedure.query(async ({ ctx }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); return db.select().from(creatorLinks).where(eq(creatorLinks.creatorId, creator.id)).orderBy(creatorLinks.sortOrder, desc(creatorLinks.createdAt)); }),
+    save: protectedProcedure.input(z.object({ id: z.number().int().optional(), pageId: z.number().int().nullable().optional(), title: z.string().trim().min(1).max(180), url: z.string().url().max(2048), description: z.string().max(320).optional(), icon: z.string().max(80).optional(), thumbnailAssetId: z.number().int().nullable().optional(), openInNewTab: z.boolean().default(true), isVisible: z.boolean().default(true), expiresAt: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); if (input.pageId) await requireOwnedPage(db, creator.id, input.pageId); if (input.thumbnailAssetId) await requireOwnedAsset(db, creator.id, input.thumbnailAssetId); const payload = { ...input, pageId: input.pageId ?? null, thumbnailAssetId: input.thumbnailAssetId ?? null, description: input.description || null, icon: input.icon || null, expiresAt: input.expiresAt ?? null, publishedAt: input.isVisible ? new Date() : null }; if (input.id) { await db.update(creatorLinks).set(payload).where(and(eq(creatorLinks.id, input.id), eq(creatorLinks.creatorId, creator.id))); return input.id; } const count = (await db.select({ id: creatorLinks.id }).from(creatorLinks).where(eq(creatorLinks.creatorId, creator.id))).length; const result = await db.insert(creatorLinks).values({ ...payload, creatorId: creator.id, sortOrder: count }); return Number(result[0].insertId); }),
+    reorder: protectedProcedure.input(z.object({ linkIds: z.array(z.number().int()).min(1) })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); await Promise.all(input.linkIds.map((id, sortOrder) => db.update(creatorLinks).set({ sortOrder }).where(and(eq(creatorLinks.id, id), eq(creatorLinks.creatorId, creator.id))))); return { success: true }; }),
+    remove: protectedProcedure.input(z.object({ id: z.number().int() })).mutation(async ({ ctx, input }) => { const db = await requireDb(); const creator = await ownedCreator(ctx); await db.delete(creatorLinks).where(and(eq(creatorLinks.id, input.id), eq(creatorLinks.creatorId, creator.id))); return { success: true }; }),
   }),
   products: router({
     list: protectedProcedure.query(async ({ ctx }) => {
@@ -250,6 +311,25 @@ export const appRouter = router({
         db.select().from(courses).where(and(eq(courses.creatorId, creator.id), eq(courses.status, "published"))),
       ]);
       return { creator, catalog, memberships, bookingServices, blocks, courses: courseCatalog };
+    }),
+    publicContent: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), slug: z.string().min(1).max(180) })).query(async ({ input }) => {
+      const db = await requireDb(); const creator = await getCreatorForHandle(input.handle);
+      if (!creator || !creator.isPublished) throw new TRPCError({ code: "NOT_FOUND", message: "Creator storefront not found." });
+      const page = (await db.select().from(creatorPages).where(and(eq(creatorPages.creatorId, creator.id), eq(creatorPages.slug, input.slug), eq(creatorPages.status, "published"))).limit(1))[0];
+      if (!page) throw new TRPCError({ code: "NOT_FOUND", message: "Page not found." });
+      const now = new Date();
+      const [blocks, links] = await Promise.all([
+        db.select().from(pageBlocks).where(and(eq(pageBlocks.pageId, page.id), eq(pageBlocks.isVisible, true))).orderBy(pageBlocks.sortOrder),
+        db.select().from(creatorLinks).where(and(eq(creatorLinks.creatorId, creator.id), eq(creatorLinks.isVisible, true))).orderBy(creatorLinks.sortOrder),
+      ]);
+      return { creator, page, blocks, links: links.filter((link) => !link.expiresAt || link.expiresAt > now) };
+    }),
+    registerLinkClick: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), linkId: z.number().int() })).mutation(async ({ input }) => {
+      const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator || !creator.isPublished) throw new TRPCError({ code: "NOT_FOUND" });
+      const link = (await db.select().from(creatorLinks).where(and(eq(creatorLinks.id, input.linkId), eq(creatorLinks.creatorId, creator.id), eq(creatorLinks.isVisible, true))).limit(1))[0];
+      if (!link || (link.expiresAt && link.expiresAt <= new Date())) throw new TRPCError({ code: "NOT_FOUND" });
+      await db.update(creatorLinks).set({ clickCount: link.clickCount + 1 }).where(eq(creatorLinks.id, link.id));
+      return { url: link.url, openInNewTab: link.openInNewTab };
     }),
     subscribe: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), email: z.string().email(), name: z.string().max(255).optional() })).mutation(async ({ input, ctx }) => {
       const db = await requireDb();

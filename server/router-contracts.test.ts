@@ -36,6 +36,21 @@ describe("CreaDock router contracts", () => {
     await expect(caller.account.download({ productId: 1 })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
+  it("protects creator media-library records from anonymous callers", async () => {
+    const caller = appRouter.createCaller(anonymousContext());
+    await expect(caller.media.library()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("protects creator page-builder records from anonymous callers", async () => {
+    const caller = appRouter.createCaller(anonymousContext());
+    await expect(caller.pages.list()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("protects creator link management from anonymous callers", async () => {
+    const caller = appRouter.createCaller(anonymousContext());
+    await expect(caller.links.list()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
   it("protects administrator email-delivery records from anonymous callers", async () => {
     const caller = appRouter.createCaller(anonymousContext());
     await expect(caller.admin.emailDeliveries()).rejects.toMatchObject({ code: "FORBIDDEN" });
