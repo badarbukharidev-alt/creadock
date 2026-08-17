@@ -379,7 +379,7 @@ export const appRouter = router({
       await getOrCreateCustomer(db, creator.id, input.email, input.name, true, ctx.user?.normalizedEmail === input.email.trim().toLowerCase() ? ctx.user.id : undefined);
       return { success: true };
     }),
-    purchase: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), email: z.string().email(), name: z.string().max(255).optional(), couponCode: z.string().trim().min(3).max(64).optional(), productId: z.number().int().optional(), membershipPlanId: z.number().int().optional() }).refine((input) => Boolean(input.productId) !== Boolean(input.membershipPlanId), "Select one offer to purchase")).mutation(async ({ input, ctx }) => {
+    purchase: publicProcedure.input(z.object({ handle: z.string().min(3).max(64), email: z.string().email(), name: z.string().max(255).optional(), couponCode: z.string().trim().min(3).max(64).optional(), productId: z.number().int().optional(), bundleId: z.number().int().optional(), membershipPlanId: z.number().int().optional() }).refine((input) => [input.productId, input.bundleId, input.membershipPlanId].filter(Boolean).length === 1, "Select one offer to purchase")).mutation(async ({ input, ctx }) => {
       const db = await requireDb(); const creator = await getCreatorForHandle(input.handle); if (!creator) throw new TRPCError({ code: "NOT_FOUND" });
       if (!stripeProvider.isConfigured()) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Payments are not configured yet. Add Stripe keys in the platform settings." });
       const customer = await getOrCreateCustomer(db, creator.id, input.email, input.name, false, ctx.user?.normalizedEmail === input.email.trim().toLowerCase() ? ctx.user.id : undefined);
@@ -396,6 +396,19 @@ export const appRouter = router({
         const checkout = await stripeProvider.createCheckout({ orderId, customerEmail: customer.email, title: product.name, amount: total.toFixed(2), currency: product.currency, mode: "payment", successUrl: `${origin}/c/${input.handle}?checkout=success&session_id={CHECKOUT_SESSION_ID}`, cancelUrl: `${origin}/c/${input.handle}?checkout=cancelled`, metadata: { creatorId: String(creator.id), customerId: String(customer.id), productId: String(product.id), ...(appliedCoupon ? { couponCode: appliedCoupon } : {}) } });
         await db.update(orders).set({ stripeCheckoutSessionId: checkout.id }).where(eq(orders.id, orderId));
         return { kind: "product" as const, orderId, checkoutUrl: checkout.url, productName: product.name };
+      }
+      if (input.bundleId) {
+        const bundle = (await db.select().from(productBundles).where(and(eq(productBundles.id, input.bundleId), eq(productBundles.creatorId, creator.id), eq(productBundles.status, "published"))).limit(1))[0];
+        if (!bundle) throw new TRPCError({ code: "NOT_FOUND", message: "Bundle is unavailable" });
+        const included = await db.select().from(bundleItems).innerJoin(products, eq(bundleItems.productId, products.id)).where(eq(bundleItems.bundleId, bundle.id));
+        const includedProducts = included.map((entry) => entry.products).filter((product) => product.status === "published" && product.visibility !== "private");
+        if (!includedProducts.length) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This bundle has no purchasable products." });
+        const orderResult = await db.insert(orders).values({ creatorId: creator.id, customerId: customer.id, orderNumber: mvpOrderNumber(), status: "pending", total: bundle.price, currency: "USD" });
+        const orderId = Number(orderResult[0].insertId);
+        await db.insert(orderItems).values(includedProducts.map((product, index) => ({ orderId, productId: product.id, title: product.name, unitPrice: index === 0 ? bundle.price : "0.00" })));
+        const checkout = await stripeProvider.createCheckout({ orderId, customerEmail: customer.email, title: bundle.name, amount: String(bundle.price), currency: "USD", mode: "payment", successUrl: `${origin}/c/${input.handle}?checkout=success&session_id={CHECKOUT_SESSION_ID}`, cancelUrl: `${origin}/c/${input.handle}?checkout=cancelled`, metadata: { creatorId: String(creator.id), customerId: String(customer.id), bundleId: String(bundle.id) } });
+        await db.update(orders).set({ stripeCheckoutSessionId: checkout.id }).where(eq(orders.id, orderId));
+        return { kind: "bundle" as const, orderId, checkoutUrl: checkout.url, bundleName: bundle.name };
       }
       const plan = (await db.select().from(membershipPlans).where(and(eq(membershipPlans.id, input.membershipPlanId!), eq(membershipPlans.creatorId, creator.id), eq(membershipPlans.status, "published"))).limit(1))[0];
       if (!plan) throw new TRPCError({ code: "NOT_FOUND", message: "Membership is unavailable" });

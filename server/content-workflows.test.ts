@@ -119,4 +119,18 @@ describe("CreaDock creator content workflows", () => {
     expect(state.inserts.some((entry) => entry.table === productBundles && (entry.values as { creatorId: number }).creatorId === 1)).toBe(true);
     expect(state.inserts.some((entry) => entry.table === bundleItems)).toBe(true);
   });
+
+  it("persists creator product setup fields and manages variant inventory", async () => {
+    state.rows.set(products, [{ id: 20, creatorId: 1, name: "Guide", status: "published", price: "20.00", type: "digital" }]);
+    state.rows.set(productVariants, [{ id: 22, productId: 20, name: "Personal", priceDelta: "0.00", inventoryLimit: null }]);
+    const caller = appRouter.createCaller(creatorContext());
+
+    await caller.products.save({ id: 20, name: "Guide", type: "digital", price: "20.00", status: "published", shortDescription: "A practical launch guide", benefits: ["Clear steps", "Reusable templates"], visibility: "unlisted", fulfillmentType: "manual", inventoryLimit: 40, productPageSettings: { ctaLabel: "Reserve access", checkoutMessage: "Delivery follows review.", layout: "editorial", seoTitle: "Creator launch guide", seoDescription: "A concise launch guide for independent creators.", collectPhone: true, collectAddress: true } });
+    await caller.products.saveVariant({ productId: 20, name: "Team license", priceDelta: "15.00", inventoryLimit: 8 });
+    await caller.products.removeVariant({ id: 22, productId: 20 });
+
+    expect(state.updates).toContainEqual(expect.objectContaining({ table: products, values: expect.objectContaining({ shortDescription: "A practical launch guide", benefits: ["Clear steps", "Reusable templates"], visibility: "unlisted", fulfillmentType: "manual", inventoryLimit: 40, productPageSettings: expect.objectContaining({ layout: "editorial", collectPhone: true, collectAddress: true }) }) }));
+    expect(state.inserts).toContainEqual(expect.objectContaining({ table: productVariants, values: expect.objectContaining({ productId: 20, name: "Team license", inventoryLimit: 8 }) }));
+    expect(state.deletes).toContainEqual({ table: productVariants });
+  });
 });
