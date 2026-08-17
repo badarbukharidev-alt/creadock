@@ -87,3 +87,10 @@
 - [x] Extend media workflow tests to cover creator-owned asset updates and folder assignment.
 - [x] Extend page workflow tests to cover new page creation and subsequent publication.
 - [x] Extend link workflow tests to cover create, reorder, removal, and rendered `/c/:handle/:slug` public links.
+- [x] Add persistent storefront visual-system settings, template selection, and richer creator-brand profile fields.
+- [x] Build a functional storefront visual builder with block management, preview modes, and safe public rendering.
+- [x] Add storefront builder, theme, template, and responsive public-rendering regression coverage.
+- [x] Expose and persist location, logo, cover image, and social profile fields in the storefront builder.
+- [x] Wire live `/c/:handle` public rendering to persisted visual settings and storefront-builder blocks.
+- [x] Add client regression coverage for builder theme, preview mode, and public builder-block rendering.
+- [x] Add client regression coverage proving persisted visual-theme colors are applied to the live public storefront.

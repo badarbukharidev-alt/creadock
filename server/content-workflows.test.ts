@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
-import { creatorLinks, creatorPages, mediaAssets, mediaFolders, pageBlocks } from "../drizzle/schema";
+import { creatorLinks, creatorPages, creators, mediaAssets, mediaFolders, pageBlocks, storefrontBlocks } from "../drizzle/schema";
 
 const state = vi.hoisted(() => ({
   rows: new Map<unknown, Array<Record<string, unknown>>>(),
@@ -93,5 +93,17 @@ describe("CreaDock creator content workflows", () => {
     expect(state.inserts.some((entry) => entry.table === creatorLinks)).toBe(true);
     expect(state.updates.filter((entry) => entry.table === creatorLinks).length).toBeGreaterThan(1);
     expect(state.deletes).toContainEqual({ table: creatorLinks });
+  });
+
+  it("persists a visual storefront system, template blocks, and creator-owned block order", async () => {
+    state.rows.set(creators, [state.creator]); state.rows.set(storefrontBlocks, []); state.rows.set(mediaAssets, []);
+    const caller = appRouter.createCaller(creatorContext());
+    await caller.storefrontBuilder.updateBrand({ displayName: "Creator", handle: "creator", headline: "Make it useful", bio: "A focused brand", theme: "editorial", accentColor: "#123456", isPublished: true, visualSettings: { backgroundColor: "#fafafa", buttonStyle: "soft", borderRadius: "lg" } });
+    expect(state.updates).toContainEqual(expect.objectContaining({ table: creators, values: expect.objectContaining({ headline: "Make it useful", theme: "editorial", visualSettings: expect.objectContaining({ buttonStyle: "soft" }) }) }));
+    await caller.storefrontBuilder.applyTemplate({ template: "creator" });
+    expect(state.inserts.some((entry) => entry.table === storefrontBlocks)).toBe(true);
+    await caller.storefrontBuilder.saveBlock({ type: "heading", title: "A better beginning", content: { text: "A better beginning" }, isVisible: true });
+    await caller.storefrontBuilder.reorderBlocks({ blockIds: [1] });
+    expect(state.updates.some((entry) => entry.table === storefrontBlocks)).toBe(true);
   });
 });
