@@ -101,3 +101,12 @@
 - [x] Add public bundle pricing and purchase presentation for published creator bundles.
 - [x] Add coupon checkout validation regressions for availability, expiry, minimum amount, limits, and discounted totals.
 - [x] Complete product-setup controls for variant inventory and remaining product-page checkout settings, then add focused creator workflow coverage.
+- [x] Add additive course-module, lesson-content, quiz, media-reference, drip, and prerequisite persistence models without breaking existing courses or enrollments.
+- [x] Build a dedicated modular course editor with module management, lesson reordering, rich lesson settings, media-library selection, visibility, drip, and prerequisite controls.
+- [x] Upgrade the authenticated student learning workspace with module navigation, lesson availability, progress, resources, quiz completion, and next/previous lesson controls.
+- [x] Add focused course-builder and student-player regression coverage, then validate responsive course workspace routes.
+- [x] Expose editable module visibility and state controls in the Course Builder, including updating existing module settings.
+- [x] Complete the intended rich lesson settings controls in the Course Builder and add focused UI or workflow regression coverage for those controls.
+- [x] Add creator-workflow regression assertions for rich lesson thumbnail, gallery, and duration persistence.
+- [x] Add a focused Course Builder UI or mutation-payload regression for thumbnail, gallery, and duration controls.
+- [x] Add a focused Course Builder client regression that drives thumbnail, gallery, and duration settings into the lesson mutation payload.

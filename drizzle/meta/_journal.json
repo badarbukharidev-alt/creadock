@@ -85,6 +85,13 @@
       "when": 1786995988413,
       "tag": "0011_flowery_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1786997735006,
+      "tag": "0012_acoustic_ikaris",
+      "breakpoints": true
     }
   ]
 }

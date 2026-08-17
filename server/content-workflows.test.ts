@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
-import { bundleItems, coupons, creatorLinks, creatorPages, creators, mediaAssets, mediaFolders, pageBlocks, productBundles, productVariants, products, storefrontBlocks } from "../drizzle/schema";
+import { bundleItems, coupons, courseModules, courses, creatorLinks, creatorPages, creators, lessons, mediaAssets, mediaFolders, pageBlocks, productBundles, productVariants, products, storefrontBlocks } from "../drizzle/schema";
 
 const state = vi.hoisted(() => ({
   rows: new Map<unknown, Array<Record<string, unknown>>>(),
@@ -132,5 +132,30 @@ describe("CreaDock creator content workflows", () => {
     expect(state.updates).toContainEqual(expect.objectContaining({ table: products, values: expect.objectContaining({ shortDescription: "A practical launch guide", benefits: ["Clear steps", "Reusable templates"], visibility: "unlisted", fulfillmentType: "manual", inventoryLimit: 40, productPageSettings: expect.objectContaining({ layout: "editorial", collectPhone: true, collectAddress: true }) }) }));
     expect(state.inserts).toContainEqual(expect.objectContaining({ table: productVariants, values: expect.objectContaining({ productId: 20, name: "Team license", inventoryLimit: 8 }) }));
     expect(state.deletes).toContainEqual({ table: productVariants });
+  });
+
+  it("builds modular courses with rich lesson access and media settings", async () => {
+    state.rows.set(courses, [{ id: 30, creatorId: 1, title: "Creator foundations", status: "draft" }]);
+    state.rows.set(courseModules, [{ id: 31, courseId: 30, title: "Start here", status: "published", isVisible: true, dripDays: 0, sortOrder: 0 }]);
+    state.rows.set(lessons, [{ id: 32, courseId: 30, moduleId: 31, title: "Welcome", kind: "text", isPublished: true, isLocked: false, dripDays: 0, sortOrder: 0 }]);
+    state.rows.set(mediaAssets, [{ id: 33, creatorId: 1, name: "lesson.mp4", kind: "video", url: "/manus-storage/lesson.mp4" }, { id: 34, creatorId: 1, name: "workbook.pdf", kind: "document", url: "/manus-storage/workbook.pdf" }]);
+    const caller = appRouter.createCaller(creatorContext());
+
+    const builder = await caller.courses.builder({ courseId: 30 });
+    expect(builder.modules).toHaveLength(1);
+    expect(builder.lessons).toHaveLength(1);
+    await caller.courses.saveModule({ courseId: 30, title: "Practice", status: "published", isVisible: true, dripDays: 7 });
+    await caller.courses.addLesson({ courseId: 30, moduleId: 31, title: "Check your understanding", kind: "quiz", quiz: { prompt: "What comes first?", choices: ["Plan", "Publish"], correctAnswerIndex: 0, explanation: "Start with a plan." }, mediaAssetId: 33, thumbnailAssetId: 33, galleryAssetIds: [33], resourceAssetIds: [34], durationSeconds: 180, isPublished: true, isLocked: true, dripDays: 2, prerequisiteLessonId: 32, isPreview: false });
+    await caller.courses.reorderModules({ courseId: 30, moduleIds: [31] });
+    await caller.courses.reorderLessons({ courseId: 30, moduleId: 31, lessonIds: [32] });
+    await caller.courses.deleteLesson({ courseId: 30, id: 32 });
+    await caller.courses.removeModule({ courseId: 30, id: 31 });
+
+    expect(state.inserts).toContainEqual(expect.objectContaining({ table: courseModules, values: expect.objectContaining({ courseId: 30, title: "Practice", dripDays: 7 }) }));
+    expect(state.inserts).toContainEqual(expect.objectContaining({ table: lessons, values: expect.objectContaining({ courseId: 30, moduleId: 31, kind: "quiz", mediaAssetId: 33, thumbnailAssetId: 33, galleryAssetIds: [33], resourceAssetIds: [34], durationSeconds: 180, isLocked: true, prerequisiteLessonId: 32 }) }));
+    expect(state.updates.some((entry) => entry.table === courseModules)).toBe(true);
+    expect(state.updates.some((entry) => entry.table === lessons)).toBe(true);
+    expect(state.deletes).toContainEqual({ table: lessons });
+    expect(state.deletes).toContainEqual({ table: courseModules });
   });
 });

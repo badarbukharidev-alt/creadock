@@ -16,6 +16,7 @@ import { LinksWorkspace, MediaLibrary, PagesWorkspace } from "./CreatorContentSt
 import StorefrontBuilder from "./StorefrontBuilder";
 import CommerceStudio from "./CommerceStudio";
 import ProductConfiguration from "./ProductConfiguration";
+import CourseBuilder from "./CourseBuilder";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const dateText = (value: Date | string) => new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -71,7 +72,7 @@ function Products() {
 
 function Courses() {
   const courseList = trpc.courses.list.useQuery();
-  const [open, setOpen] = useState(false); const [selectedId, setSelectedId] = useState<number | null>(null); const [title, setTitle] = useState(""); const [description, setDescription] = useState(""); const [lessonTitle, setLessonTitle] = useState(""); const [lessonBody, setLessonBody] = useState(""); const [lessonKind, setLessonKind] = useState<"text" | "video" | "download">("text"); const [editingLessonId, setEditingLessonId] = useState<number | null>(null);
+  const [open, setOpen] = useState(false); const [selectedId, setSelectedId] = useState<number | null>(null); const [title, setTitle] = useState(""); const [description, setDescription] = useState(""); const [lessonTitle, setLessonTitle] = useState(""); const [lessonBody, setLessonBody] = useState(""); const [lessonKind, setLessonKind] = useState<"text" | "video" | "audio" | "image" | "download" | "quiz">("text"); const [editingLessonId, setEditingLessonId] = useState<number | null>(null);
   const create = trpc.courses.create.useMutation({ onSuccess: (id) => { toast.success("Course created"); courseList.refetch(); setSelectedId(id); setOpen(false); } });
   const update = trpc.courses.update.useMutation({ onSuccess: () => { toast.success("Course updated"); courseList.refetch(); } });
   const lessons = trpc.courses.lessons.useQuery({ courseId: selectedId ?? 0 }, { enabled: Boolean(selectedId) });
@@ -117,7 +118,7 @@ function WorkspaceContent({ section }: { section: string }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="min-h-screen bg-[#f7f7f3]" />;
   if (!user) return null;
-  return { dashboard: <Overview />, products: <Products />, "product-settings": <ProductConfiguration />, commerce: <CommerceStudio />, courses: <Courses />, bookings: <Bookings />, memberships: <Memberships />, customers: <Customers />, email: <Email />, store: <StorefrontBuilder />, appearance: <StorefrontBuilder />, pages: <PagesWorkspace />, links: <LinksWorkspace />, media: <MediaLibrary />, analytics: <Analytics />, checkout: <Checkout />, settings: <StoreSettings />, help: <Help /> }[section] || <Overview />;
+  return { dashboard: <Overview />, products: <Products />, "product-settings": <ProductConfiguration />, commerce: <CommerceStudio />, courses: <CourseBuilder />, bookings: <Bookings />, memberships: <Memberships />, customers: <Customers />, email: <Email />, store: <StorefrontBuilder />, appearance: <StorefrontBuilder />, pages: <PagesWorkspace />, links: <LinksWorkspace />, media: <MediaLibrary />, analytics: <Analytics />, checkout: <Checkout />, settings: <StoreSettings />, help: <Help /> }[section] || <Overview />;
 }
 
 export default function CreatorDashboard() {

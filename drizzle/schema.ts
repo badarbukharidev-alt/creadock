@@ -266,24 +266,53 @@ export const courses = mysqlTable("courses", {
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
   coverUrl: varchar("coverUrl", { length: 1024 }),
+  thumbnailAssetId: int("thumbnailAssetId").references(() => mediaAssets.id, { onDelete: "set null" }),
+  coverAssetId: int("coverAssetId").references(() => mediaAssets.id, { onDelete: "set null" }),
+  learningOutcomes: json("learningOutcomes").$type<string[]>(),
+  settings: json("settings").$type<{ instructorName?: string; welcomeMessage?: string; certificateEnabled?: boolean }>(),
   status: mysqlEnum("status", ["draft", "published"]).default("draft").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => [index("courses_creator_idx").on(table.creatorId)]);
 
-export const lessons = mysqlTable("lessons", {
+export const courseModules = mysqlTable("courseModules", {
   id: int("id").autoincrement().primaryKey(),
   courseId: int("courseId").notNull().references(() => courses.id, { onDelete: "cascade" }),
   title: varchar("title", { length: 255 }).notNull(),
-  kind: mysqlEnum("kind", ["text", "video", "download"]).default("text").notNull(),
+  description: text("description"),
+  imageAssetId: int("imageAssetId").references(() => mediaAssets.id, { onDelete: "set null" }),
+  status: mysqlEnum("status", ["draft", "published"]).default("draft").notNull(),
+  isVisible: boolean("isVisible").default(true).notNull(),
+  dripDays: int("dripDays").default(0).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("course_modules_course_idx").on(table.courseId, table.sortOrder)]);
+
+export const lessons = mysqlTable("lessons", {
+  id: int("id").autoincrement().primaryKey(),
+  courseId: int("courseId").notNull().references(() => courses.id, { onDelete: "cascade" }),
+  moduleId: int("moduleId").references(() => courseModules.id, { onDelete: "set null" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  kind: mysqlEnum("kind", ["text", "video", "audio", "image", "download", "quiz"]).default("text").notNull(),
   body: text("body"),
   videoUrl: varchar("videoUrl", { length: 1024 }),
   fileUrl: varchar("fileUrl", { length: 1024 }),
+  mediaAssetId: int("mediaAssetId").references(() => mediaAssets.id, { onDelete: "set null" }),
+  thumbnailAssetId: int("thumbnailAssetId").references(() => mediaAssets.id, { onDelete: "set null" }),
+  galleryAssetIds: json("galleryAssetIds").$type<number[]>(),
+  resourceAssetIds: json("resourceAssetIds").$type<number[]>(),
+  durationSeconds: int("durationSeconds"),
+  quiz: json("quiz").$type<{ prompt: string; choices: string[]; correctAnswerIndex: number; explanation?: string; passingScore?: number }>(),
+  isPublished: boolean("isPublished").default(true).notNull(),
+  isLocked: boolean("isLocked").default(false).notNull(),
+  dripDays: int("dripDays").default(0).notNull(),
+  prerequisiteLessonId: int("prerequisiteLessonId").references((): any => lessons.id, { onDelete: "set null" }),
   sortOrder: int("sortOrder").default(0).notNull(),
   isPreview: boolean("isPreview").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, (table) => [index("lessons_course_idx").on(table.courseId, table.sortOrder)]);
+}, (table) => [index("lessons_course_idx").on(table.courseId, table.sortOrder), index("lessons_module_idx").on(table.moduleId, table.sortOrder), index("lessons_prerequisite_idx").on(table.prerequisiteLessonId)]);
 
 export const customers = mysqlTable("customers", {
   id: int("id").autoincrement().primaryKey(),
@@ -307,6 +336,16 @@ export const enrollments = mysqlTable("enrollments", {
   enrolledAt: timestamp("enrolledAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
 }, (table) => [uniqueIndex("enrollments_course_customer_idx").on(table.courseId, table.customerId)]);
+
+export const lessonQuizAttempts = mysqlTable("lessonQuizAttempts", {
+  id: int("id").autoincrement().primaryKey(),
+  enrollmentId: int("enrollmentId").notNull().references(() => enrollments.id, { onDelete: "cascade" }),
+  lessonId: int("lessonId").notNull().references(() => lessons.id, { onDelete: "cascade" }),
+  selectedAnswerIndex: int("selectedAnswerIndex").notNull(),
+  score: int("score").notNull(),
+  isPassed: boolean("isPassed").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("lesson_quiz_attempts_enrollment_idx").on(table.enrollmentId, table.lessonId), index("lesson_quiz_attempts_lesson_idx").on(table.lessonId)]);
 
 export const digitalEntitlements = mysqlTable("digitalEntitlements", {
   id: int("id").autoincrement().primaryKey(),
