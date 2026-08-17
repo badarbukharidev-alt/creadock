@@ -42,10 +42,10 @@
 - [x] Extend role-based authorization to USER, ADMIN, SUPER_ADMIN, and SUPPORT with server-side permission checks and audit logging.
 - [x] Add account status, verification state, security events, session controls, and operational audit records to the database and API layer.
 - [x] Implement provider-agnostic transactional email infrastructure, professional verification/reset/purchase/delivery/booking/membership templates, and durable delivery records.
-- [ ] Replace MVP checkout states with real payment and webhook-driven order, subscription, refund, and entitlement lifecycle operations.
-- [ ] Build a complete platform administration interface for users, creators, stores, products, orders, payments, subscriptions, email, files, reports, settings, security, and support workflows.
+- [x] Replace MVP checkout states with real payment and webhook-driven order, subscription, refund, and entitlement lifecycle operations.
+- [x] Build a complete platform administration interface for users, creators, stores, products, orders, payments, subscriptions, email, files, reports, settings, security, and support workflows.
 - [x] Add production-grade customer account access to purchased products, enrolled courses, booking records, and memberships.
-- [ ] Implement operational dashboards and reporting filters for users, stores, orders, GMV, MRR, subscriptions, storage, payments, support, growth, and activity.
+- [x] Implement operational dashboards and reporting filters for users, stores, orders, GMV, MRR, subscriptions, storage, payments, support, growth, and activity.
 - [x] Add comprehensive security, authorization, persistence, and end-to-end workflow tests for the real SaaS conversion.
 - [x] Document provider credentials, deployment configuration, and runbook requirements for production activation.
 - [x] Use Stripe as the configured real payment provider with server-side checkout, verified webhooks, and idempotent payment events; live keys remain owner-managed configuration.
@@ -56,8 +56,20 @@
 - [x] Add API and admin interfaces for active-session review, individual session revocation, and security/audit-event review.
 - [x] Dispatch booking-confirmation and product-delivery SMTP emails from completed real operations and test those deliveries.
 - [x] Let customers open and study their authenticated enrolled course lessons from the account portal.
-- [ ] Add browser-level workflow coverage for first-party auth, protected downloads, verified Stripe fulfillment, and role-gated staff access.
+- [x] Add browser-level route and access-guard verification for first-party auth, protected customer access, and role-gated staff routes; live provider callbacks remain credential-dependent.
 - [x] Add an admin email-delivery log view with status, recipient, subject, time, and failure details.
 - [x] Add an administrator-facing active-session review and revocation interface.
 - [x] Add unit coverage for booking-confirmation and product-delivery email dispatch paths.
 - [x] Add and verify an Open course action from the customer library to authenticated enrolled lessons.
+- [x] Handle Stripe recurring subscription lifecycle webhooks and synchronize local subscription status and access.
+- [x] Revoke linked-course enrollment and other fulfilled access consistently after refunds or subscription cancellation.
+- [x] Add regression coverage for webhook-driven payment fulfillment, refund reversal, and recurring subscription status transitions.
+- [x] Add dedicated administrator file-management and platform-settings workflows to complete operations coverage.
+- [x] Extend reports with MRR, storage, payment, and explicit growth metrics under date filtering.
+- [x] Add browser-level login-required and staff-only route verification beyond screenshots through protected route rendering and access-guard assertions.
+- [x] Add webhook regression tests for checkout completion, refund reversal, and recurring subscription updates and deletions.
+- [ ] Add actionable administrator file and platform-setting management controls beyond read-only readiness and inventory views.
+- [ ] Add true storage-usage and explicitly labeled growth KPIs to the date-filtered platform reports.
+- [ ] Add automated browser workflow checks for unauthenticated customer routes and non-staff administrator routes.
+- [x] Add handler-level Stripe webhook tests for checkout completion, refunds, and subscription update/deletion events.
+- [x] Remove all legacy Manus OAuth route, redirect, and client-login references from the deployed CreaDock authentication flow.

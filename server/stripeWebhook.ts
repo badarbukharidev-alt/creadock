@@ -10,7 +10,7 @@ export async function dispatchProductFulfillmentEmails(input: { customer: { id: 
   if (input.deliveryUrl) await sendEmail({ to: input.customer.email, ...emailTemplates.delivery(input.customer.name || "there", input.product.name, input.deliveryUrl) }, { kind: "product_delivery", creatorId: input.creatorId, customerId: input.customer.id });
 }
 
-async function completeOrder(orderId: number, paymentIntentId: string | null) {
+async function completeOrder(orderId: number, paymentIntentId: string | null, stripeSubscriptionId: string | null) {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
   const order = (await db.select().from(orders).where(eq(orders.id, orderId)).limit(1))[0];
@@ -32,11 +32,35 @@ async function completeOrder(orderId: number, paymentIntentId: string | null) {
     if (item.membershipPlanId && customer) {
       const plan = (await db.select().from(membershipPlans).where(eq(membershipPlans.id, item.membershipPlanId)).limit(1))[0];
       if (plan) {
-        await db.insert(subscriptions).values({ planId: plan.id, customerId: customer.id, status: "active" }).onDuplicateKeyUpdate({ set: { status: "active" } });
+        await db.insert(subscriptions).values({ planId: plan.id, customerId: customer.id, stripeSubscriptionId, status: "active" }).onDuplicateKeyUpdate({ set: { status: "active", stripeSubscriptionId } });
         await sendEmail({ to: customer.email, ...emailTemplates.membership(customer.name || "there", plan.name) }, { kind: "membership_confirmation", creatorId: order.creatorId, customerId: customer.id });
       }
     }
   }
+}
+
+async function refundOrder(paymentIntentId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const order = (await db.select().from(orders).where(eq(orders.stripePaymentIntentId, paymentIntentId)).limit(1))[0];
+  if (!order || order.status === "refunded") return;
+  const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+  await db.update(orders).set({ status: "refunded" }).where(eq(orders.id, order.id));
+  for (const item of items) {
+    if (item.productId) { await db.delete(digitalEntitlements).where(and(eq(digitalEntitlements.orderId, order.id), eq(digitalEntitlements.productId, item.productId))); const linkedCourses = await db.select({ id: courses.id }).from(courses).where(and(eq(courses.productId, item.productId), eq(courses.creatorId, order.creatorId))); for (const course of linkedCourses) if (order.customerId) await db.delete(enrollments).where(and(eq(enrollments.courseId, course.id), eq(enrollments.customerId, order.customerId))); }
+    if (item.membershipPlanId && order.customerId) await db.update(subscriptions).set({ status: "cancelled" }).where(and(eq(subscriptions.customerId, order.customerId), eq(subscriptions.planId, item.membershipPlanId)));
+  }
+}
+
+export function mapStripeSubscriptionStatus(stripeStatus: string) {
+  return stripeStatus === "active" || stripeStatus === "trialing" ? "active" : stripeStatus === "past_due" || stripeStatus === "unpaid" || stripeStatus === "incomplete" ? "past_due" : stripeStatus === "paused" ? "paused" : "cancelled";
+}
+
+async function syncSubscription(stripeSubscriptionId: string, stripeStatus: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  const status = mapStripeSubscriptionStatus(stripeStatus);
+  await db.update(subscriptions).set({ status }).where(eq(subscriptions.stripeSubscriptionId, stripeSubscriptionId));
 }
 
 export async function handleStripeWebhook(req: Request, res: Response) {
@@ -56,7 +80,15 @@ export async function handleStripeWebhook(req: Request, res: Response) {
       const session = event.data.object;
       const completedOrderId = Number(session.metadata?.orderId || session.client_reference_id || 0);
       if (!completedOrderId) throw new Error("Checkout event was missing order metadata");
-      await completeOrder(completedOrderId, typeof session.payment_intent === "string" ? session.payment_intent : null);
+      await completeOrder(completedOrderId, typeof session.payment_intent === "string" ? session.payment_intent : null, typeof session.subscription === "string" ? session.subscription : null);
+    }
+    if (event.type === "charge.refunded") {
+      const charge = event.data.object;
+      if (typeof charge.payment_intent === "string") await refundOrder(charge.payment_intent);
+    }
+    if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+      const subscription = event.data.object;
+      await syncSubscription(subscription.id, event.type === "customer.subscription.deleted" ? "canceled" : subscription.status);
     }
     await db.update(paymentEvents).set({ status: "processed", processedAt: new Date() }).where(eq(paymentEvents.id, paymentEventId));
     return res.json({ received: true });

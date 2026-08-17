@@ -9,7 +9,7 @@ vi.mock("./email", () => ({
   },
 }));
 
-const { dispatchProductFulfillmentEmails } = await import("./stripeWebhook");
+const { dispatchProductFulfillmentEmails, mapStripeSubscriptionStatus } = await import("./stripeWebhook");
 
 describe("Stripe fulfillment delivery", () => {
   it("records both a purchase confirmation and private product delivery when a file is available", async () => {
@@ -23,5 +23,17 @@ describe("Stripe fulfillment delivery", () => {
     await dispatchProductFulfillmentEmails({ customer: { id: 8, email: "buyer@example.com", name: null }, product: { name: "Service" }, deliveryUrl: null, creatorId: 3 });
     expect(sendEmail).toHaveBeenCalledTimes(1);
     expect(sendEmail.mock.calls[0]?.[1]).toMatchObject({ kind: "purchase_confirmation" });
+  });
+  it("maps paid and trialing Stripe subscriptions to active access", () => {
+    expect(mapStripeSubscriptionStatus("active")).toBe("active");
+    expect(mapStripeSubscriptionStatus("trialing")).toBe("active");
+  });
+  it("maps delinquent Stripe subscription states to past-due access", () => {
+    expect(mapStripeSubscriptionStatus("past_due")).toBe("past_due");
+    expect(mapStripeSubscriptionStatus("unpaid")).toBe("past_due");
+  });
+  it("maps pauses and cancellation to the local access states", () => {
+    expect(mapStripeSubscriptionStatus("paused")).toBe("paused");
+    expect(mapStripeSubscriptionStatus("canceled")).toBe("cancelled");
   });
 });
