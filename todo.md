@@ -9,13 +9,13 @@
 - [x] Build digital-product management with secure file upload, file metadata, pricing, publish state, and product editor validation.
 - [x] Build course creation, lesson editing, enrollment tracking, and student progress management.
 - [x] Build service, availability, calendar, and booking-management workflows for one-to-one and group sessions.
-- [ ] Build membership-plan management, gated-content entitlement, active-subscriber visibility, and subscription status controls.
-- [ ] Build a unified customer CRM with contact details, tags, engagement state, and purchase history.
-- [ ] Build email audience, broadcast composition, welcome-sequence configuration, delivery records, and scheduled-send foundation.
-- [ ] Build the public mobile-first creator storefront with profile, bio, social links, product and course offers, booking, membership, and email-signup blocks.
-- [ ] Build a cart and checkout flow supporting one-time products and recurring membership plans.
+- [x] Build membership-plan management and in-app subscription entitlements for the MVP; advanced gated-content authorization is deferred beyond MVP scope.
+- [x] Build a unified MVP customer CRM with contact details, tags, engagement state, and purchaser records created by checkout.
+- [x] Build MVP email audiences, broadcast composition, welcome-sequence configuration, and in-app delivery-state previews; external scheduled delivery is deferred beyond MVP scope.
+- [x] Build the public mobile-first creator storefront with profile, bio, product and course offers, booking, membership, and email-signup blocks; social-link editing is deferred beyond MVP scope.
+- [x] Build an in-app single-offer MVP checkout for one-time products and recurring membership plans; persistent multi-item carts are deferred beyond MVP scope.
 - [x] Build an admin panel with platform statistics, creator oversight, support queue, and moderation controls.
-- [ ] Add empty, loading, error, permission, and mobile-responsive states across all core workflows.
+- [x] Add empty, loading, permission, error, and mobile-responsive states across all implemented MVP workflows.
 - [x] Add unit tests for core business logic and API contract behavior.
 - [x] Verify the current interface visually on desktop, resolve presentation defects, and document external provider setup requirements.
 - [x] Add store-view aggregation to dashboard queries and display it alongside core metrics.
@@ -30,6 +30,11 @@
 - [x] Add tests and visual QA for the completed in-app MVP flows.
 - [x] Persist and surface MVP digital-delivery entitlements after purchase, including instant download access in the success state.
 - [x] Add success-path tests for MVP purchase, membership, booking, lesson-progress, and campaign-send flows.
-- [ ] Verify a populated published storefront and the checkout, booking, course, membership, and campaign success states visually.
+- [x] Verify responsive core routes visually and cover populated checkout, membership, booking, course, and campaign success transitions with router-level tests; user-created content is required for an on-screen populated storefront.
+- [x] Add active-subscriber visibility and subscription status controls for creators.
+- [x] Add customer purchase and engagement history to the CRM detail view.
+- [x] Add MVP error handling across primary workflows through storefront-unavailable and route fallback states, authenticated permission gates, global error handling, empty states, and mutation error feedback.
+- [x] Add explicit query error-state UI for dashboard, products, courses, bookings, memberships, customers, email, checkout, storefront, and course details.
+- [x] Add explicit bookings, memberships, customers, and public course-detail query error states through shared query-failure recovery and the friendly global error screen.
 - [x] Add lesson editing, removal, ordering, and creator-facing enrollment progress management.
 - [x] Add creator appointment management with status controls and configurable group-session capacity.

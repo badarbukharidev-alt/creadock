@@ -1,60 +1,14 @@
-import { cn } from "@/lib/utils";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import { Component, ReactNode } from "react";
 
-interface Props {
-  children: ReactNode;
-}
-
-interface State {
-  hasError: boolean;
-  error: Error | null;
-}
+interface Props { children: ReactNode; }
+interface State { hasError: boolean; }
 
 class ErrorBoundary extends Component<Props, State> {
-  constructor(props: Props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
-  }
-
+  constructor(props: Props) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError(): State { return { hasError: true }; }
   render() {
-    if (this.state.hasError) {
-      return (
-        <div className="flex items-center justify-center min-h-screen p-8 bg-background">
-          <div className="flex flex-col items-center w-full max-w-2xl p-8">
-            <AlertTriangle
-              size={48}
-              className="text-destructive mb-6 flex-shrink-0"
-            />
-
-            <h2 className="text-xl mb-4">An unexpected error occurred.</h2>
-
-            <div className="p-4 w-full rounded bg-muted overflow-auto mb-6">
-              <pre className="text-sm text-muted-foreground whitespace-break-spaces">
-                {this.state.error?.stack}
-              </pre>
-            </div>
-
-            <button
-              onClick={() => window.location.reload()}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg",
-                "bg-primary text-primary-foreground",
-                "hover:opacity-90 cursor-pointer"
-              )}
-            >
-              <RotateCcw size={16} />
-              Reload Page
-            </button>
-          </div>
-        </div>
-      );
-    }
-
+    if (this.state.hasError) return <main className="grid min-h-screen place-items-center bg-[#f7f7f3] px-6 text-center"><section className="max-w-md rounded-3xl border border-slate-200 bg-white p-9 shadow-[0_25px_60px_-40px_rgba(15,23,42,.3)]"><span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-red-50 text-red-600"><AlertTriangle className="h-5 w-5" /></span><h1 className="mt-5 text-2xl font-semibold tracking-[-.05em] text-slate-950">We could not load this workspace</h1><p className="mt-3 text-sm leading-6 text-slate-500">Please refresh the page and try again. If the problem continues, return to your dashboard shortly.</p><button onClick={() => window.location.reload()} className="mx-auto mt-6 inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"><RotateCcw className="h-4 w-4" />Refresh page</button></section></main>;
     return this.props.children;
   }
 }
