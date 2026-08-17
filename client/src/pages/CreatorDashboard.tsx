@@ -11,6 +11,7 @@ import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import { ArrowUpRight, CalendarDays, Check, ChevronRight, Copy, CreditCard, ExternalLink, FileText, Mail, Package, Plus, Send, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const dateText = (value: Date | string) => new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -108,4 +109,15 @@ function Checkout() { const creator = trpc.creator.mine.useQuery(); if (creator.
 
 function Help() { return <><PageHeading title="Help center" description="Find the next best step for your storefront, offers, audience, and payments." /><Panel className="divide-y divide-slate-100">{["Set up your first offer", "Publish your creator storefront", "Connect payments", "Invite a teammate"].map((item) => <button key={item} className="flex w-full items-center justify-between px-5 py-4 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"><span>{item}</span><ChevronRight className="h-4 w-4 text-slate-400" /></button>)}</Panel></> }
 
-export default function CreatorDashboard() { const [location] = useLocation(); const section = location.split("/")[2] || "dashboard"; const body = { dashboard: <Overview />, products: <Products />, courses: <Courses />, bookings: <Bookings />, memberships: <Memberships />, customers: <Customers />, email: <Email />, store: <StoreSettings />, appearance: <StoreSettings appearance />, analytics: <Analytics />, checkout: <Checkout />, settings: <StoreSettings />, help: <Help /> }[section] || <Overview />; return <DashboardLayout>{body}</DashboardLayout>; }
+function WorkspaceContent({ section }: { section: string }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="min-h-screen bg-[#f7f7f3]" />;
+  if (!user) return null;
+  return { dashboard: <Overview />, products: <Products />, courses: <Courses />, bookings: <Bookings />, memberships: <Memberships />, customers: <Customers />, email: <Email />, store: <StoreSettings />, appearance: <StoreSettings appearance />, analytics: <Analytics />, checkout: <Checkout />, settings: <StoreSettings />, help: <Help /> }[section] || <Overview />;
+}
+
+export default function CreatorDashboard() {
+  const [location] = useLocation();
+  const section = location.split("/")[2] || "dashboard";
+  return <DashboardLayout><WorkspaceContent section={section} /></DashboardLayout>;
+}

@@ -45,6 +45,12 @@ describe("CreaDock browser route-guard workflows", () => {
     expect(screen.getByRole("link", { name: /sign in/i })).toHaveAttribute("href", "/login");
   });
 
+  it("does not mount protected creator queries while the dashboard session gate has no user", () => {
+    mocks.useAuth.mockReturnValue({ user: null, loading: false });
+    renderAt("/app/dashboard");
+    expect(screen.getByRole("heading", { name: "Your business, in one calm workspace." })).toBeInTheDocument();
+  });
+
   it("renders the administrator denial page for a signed-in non-staff route visitor", () => {
     mocks.useAuth.mockReturnValue({ user: { id: 8, role: "user", email: "customer@example.com" }, loading: false });
     renderAt("/admin");

@@ -74,3 +74,4 @@
 - [x] Add handler-level Stripe webhook tests for checkout completion, refunds, and subscription update/deletion events.
 - [x] Remove all legacy Manus OAuth route, redirect, and client-login references from the deployed CreaDock authentication flow.
 - [x] Fix successful first-party login navigation so authenticated users enter the creator workspace rather than remaining on the sign-in gate.
+- [x] Prevent protected creator-dashboard queries from running until the first-party session has resolved after login.

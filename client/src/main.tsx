@@ -6,7 +6,7 @@ import App from "./App";
 import { trpc } from "./lib/trpc";
 import "./index.css";
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { throwOnError: true } } });
+const queryClient = new QueryClient({ defaultOptions: { queries: { throwOnError: false } } });
 
 queryClient.getQueryCache().subscribe((event) => {
   if (event.type === "updated" && event.action.type === "error") console.error("[API Query Error]", event.query.state.error);
