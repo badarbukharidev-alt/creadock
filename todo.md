@@ -76,3 +76,4 @@
 - [x] Fix successful first-party login navigation so authenticated users enter the creator workspace rather than remaining on the sign-in gate.
 - [x] Prevent protected creator-dashboard queries from running until the first-party session has resolved after login.
 - [x] Eliminate the remaining premature protected API request on /app/dashboard when no first-party user session is available.
+- [x] Replace hardcoded creator public-link domains with the active application origin.
