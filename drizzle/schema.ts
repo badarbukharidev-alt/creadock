@@ -1,17 +1,19 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import {
+  boolean,
+  decimal,
+  index,
+  int,
+  json,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/mysql-core";
 
-/**
- * Core user table backing auth flow.
- * Extend this file with additional tables as your product grows.
- * Columns use camelCase to match both database fields and generated types.
- */
 export const users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -22,7 +24,252 @@ export const users = mysqlTable("users", {
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
+export const creators = mysqlTable("creators", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  handle: varchar("handle", { length: 64 }).notNull().unique(),
+  displayName: varchar("displayName", { length: 160 }).notNull(),
+  bio: text("bio"),
+  avatarUrl: varchar("avatarUrl", { length: 1024 }),
+  theme: mysqlEnum("theme", ["minimal", "creator", "editorial", "business", "education", "dark"]).default("minimal").notNull(),
+  accentColor: varchar("accentColor", { length: 16 }).default("#1d4ed8").notNull(),
+  customDomain: varchar("customDomain", { length: 255 }),
+  socialLinks: json("socialLinks").$type<Array<{ label: string; url: string }>>(),
+  isPublished: boolean("isPublished").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("creators_handle_idx").on(table.handle)]);
+
+export const storefrontBlocks = mysqlTable("storefrontBlocks", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  type: mysqlEnum("type", ["profile", "text", "button", "social", "product", "productGrid", "course", "booking", "image", "email", "membership", "faq", "embed"]).notNull(),
+  title: varchar("title", { length: 255 }),
+  content: json("content").$type<Record<string, unknown>>().notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isVisible: boolean("isVisible").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("storefront_blocks_creator_idx").on(table.creatorId, table.sortOrder)]);
+
+export const products = mysqlTable("products", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull(),
+  description: text("description"),
+  type: mysqlEnum("type", ["digital", "course", "service", "membership", "external"]).default("digital").notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }).default("0.00").notNull(),
+  compareAtPrice: decimal("compareAtPrice", { precision: 10, scale: 2 }),
+  currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+  thumbnailUrl: varchar("thumbnailUrl", { length: 1024 }),
+  fileKey: varchar("fileKey", { length: 1024 }),
+  fileUrl: varchar("fileUrl", { length: 1024 }),
+  externalUrl: varchar("externalUrl", { length: 1024 }),
+  status: mysqlEnum("status", ["draft", "published", "archived"]).default("draft").notNull(),
+  stripeProductId: varchar("stripeProductId", { length: 255 }),
+  stripePriceId: varchar("stripePriceId", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [uniqueIndex("products_creator_slug_idx").on(table.creatorId, table.slug), index("products_creator_status_idx").on(table.creatorId, table.status)]);
+
+export const courses = mysqlTable("courses", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  productId: int("productId").references(() => products.id, { onDelete: "set null" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  coverUrl: varchar("coverUrl", { length: 1024 }),
+  status: mysqlEnum("status", ["draft", "published"]).default("draft").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("courses_creator_idx").on(table.creatorId)]);
+
+export const lessons = mysqlTable("lessons", {
+  id: int("id").autoincrement().primaryKey(),
+  courseId: int("courseId").notNull().references(() => courses.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  kind: mysqlEnum("kind", ["text", "video", "download"]).default("text").notNull(),
+  body: text("body"),
+  videoUrl: varchar("videoUrl", { length: 1024 }),
+  fileUrl: varchar("fileUrl", { length: 1024 }),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  isPreview: boolean("isPreview").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("lessons_course_idx").on(table.courseId, table.sortOrder)]);
+
+export const customers = mysqlTable("customers", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  email: varchar("email", { length: 320 }).notNull(),
+  name: varchar("name", { length: 255 }),
+  tags: json("tags").$type<string[]>(),
+  notes: text("notes"),
+  stripeCustomerId: varchar("stripeCustomerId", { length: 255 }),
+  marketingOptIn: boolean("marketingOptIn").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [uniqueIndex("customers_creator_email_idx").on(table.creatorId, table.email), index("customers_creator_idx").on(table.creatorId)]);
+
+export const enrollments = mysqlTable("enrollments", {
+  id: int("id").autoincrement().primaryKey(),
+  courseId: int("courseId").notNull().references(() => courses.id, { onDelete: "cascade" }),
+  customerId: int("customerId").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  completedLessonIds: json("completedLessonIds").$type<number[]>().notNull(),
+  enrolledAt: timestamp("enrolledAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+}, (table) => [uniqueIndex("enrollments_course_customer_idx").on(table.courseId, table.customerId)]);
+
+export const digitalEntitlements = mysqlTable("digitalEntitlements", {
+  id: int("id").autoincrement().primaryKey(),
+  customerId: int("customerId").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  productId: int("productId").notNull().references(() => products.id, { onDelete: "cascade" }),
+  orderId: int("orderId").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  deliveryUrl: varchar("deliveryUrl", { length: 1024 }),
+  grantedAt: timestamp("grantedAt").defaultNow().notNull(),
+}, (table) => [uniqueIndex("digital_entitlements_customer_product_idx").on(table.customerId, table.productId), index("digital_entitlements_order_idx").on(table.orderId)]);
+
+export const services = mysqlTable("services", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  durationMinutes: int("durationMinutes").default(30).notNull(),
+  capacity: int("capacity").default(1).notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }).default("0.00").notNull(),
+  status: mysqlEnum("status", ["draft", "published"]).default("draft").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("services_creator_idx").on(table.creatorId)]);
+
+export const availabilitySlots = mysqlTable("availabilitySlots", {
+  id: int("id").autoincrement().primaryKey(),
+  serviceId: int("serviceId").notNull().references(() => services.id, { onDelete: "cascade" }),
+  startsAt: timestamp("startsAt").notNull(),
+  endsAt: timestamp("endsAt").notNull(),
+  isBooked: boolean("isBooked").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("availability_service_starts_idx").on(table.serviceId, table.startsAt)]);
+
+export const appointments = mysqlTable("appointments", {
+  id: int("id").autoincrement().primaryKey(),
+  serviceId: int("serviceId").notNull().references(() => services.id, { onDelete: "cascade" }),
+  customerId: int("customerId").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  slotId: int("slotId").references(() => availabilitySlots.id, { onDelete: "set null" }),
+  status: mysqlEnum("status", ["pending", "confirmed", "cancelled", "completed"]).default("pending").notNull(),
+  meetingUrl: varchar("meetingUrl", { length: 1024 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("appointments_service_idx").on(table.serviceId)]);
+
+export const membershipPlans = mysqlTable("membershipPlans", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  benefits: json("benefits").$type<string[]>().notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  interval: mysqlEnum("interval", ["month", "year"]).default("month").notNull(),
+  status: mysqlEnum("status", ["draft", "published", "archived"]).default("draft").notNull(),
+  stripeProductId: varchar("stripeProductId", { length: 255 }),
+  stripePriceId: varchar("stripePriceId", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("membership_plans_creator_idx").on(table.creatorId)]);
+
+export const subscriptions = mysqlTable("subscriptions", {
+  id: int("id").autoincrement().primaryKey(),
+  planId: int("planId").notNull().references(() => membershipPlans.id, { onDelete: "cascade" }),
+  customerId: int("customerId").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  stripeSubscriptionId: varchar("stripeSubscriptionId", { length: 255 }),
+  status: mysqlEnum("status", ["active", "past_due", "cancelled", "paused"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("subscriptions_customer_idx").on(table.customerId), index("subscriptions_plan_idx").on(table.planId)]);
+
+export const orders = mysqlTable("orders", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  customerId: int("customerId").references(() => customers.id, { onDelete: "set null" }),
+  orderNumber: varchar("orderNumber", { length: 64 }).notNull().unique(),
+  status: mysqlEnum("status", ["pending", "paid", "refunded", "cancelled"]).default("pending").notNull(),
+  total: decimal("total", { precision: 10, scale: 2 }).default("0.00").notNull(),
+  currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+  stripePaymentIntentId: varchar("stripePaymentIntentId", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("orders_creator_status_idx").on(table.creatorId, table.status), index("orders_customer_idx").on(table.customerId)]);
+
+export const orderItems = mysqlTable("orderItems", {
+  id: int("id").autoincrement().primaryKey(),
+  orderId: int("orderId").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  productId: int("productId").references(() => products.id, { onDelete: "set null" }),
+  membershipPlanId: int("membershipPlanId").references(() => membershipPlans.id, { onDelete: "set null" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  quantity: int("quantity").default(1).notNull(),
+  unitPrice: decimal("unitPrice", { precision: 10, scale: 2 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("order_items_order_idx").on(table.orderId)]);
+
+export const storeVisits = mysqlTable("storeVisits", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  visitorKey: varchar("visitorKey", { length: 128 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("store_visits_creator_idx").on(table.creatorId, table.createdAt)]);
+
+export const emailAudiences = mysqlTable("emailAudiences", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("email_audiences_creator_idx").on(table.creatorId)]);
+
+export const emailCampaigns = mysqlTable("emailCampaigns", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  audienceId: int("audienceId").references(() => emailAudiences.id, { onDelete: "set null" }),
+  subject: varchar("subject", { length: 255 }).notNull(),
+  previewText: varchar("previewText", { length: 255 }),
+  body: text("body").notNull(),
+  status: mysqlEnum("status", ["draft", "scheduled", "sent"]).default("draft").notNull(),
+  scheduledFor: timestamp("scheduledFor"),
+  sentAt: timestamp("sentAt"),
+  scheduleCronTaskUid: varchar("schedule_cron_task_uid", { length: 65 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("email_campaigns_creator_idx").on(table.creatorId), index("email_campaigns_task_uid_idx").on(table.scheduleCronTaskUid)]);
+
+export const emailSequences = mysqlTable("emailSequences", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").notNull().references(() => creators.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  trigger: mysqlEnum("trigger", ["signup", "purchase", "enrollment"]).default("signup").notNull(),
+  isActive: boolean("isActive").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("email_sequences_creator_idx").on(table.creatorId)]);
+
+export const emailSequenceSteps = mysqlTable("emailSequenceSteps", {
+  id: int("id").autoincrement().primaryKey(),
+  sequenceId: int("sequenceId").notNull().references(() => emailSequences.id, { onDelete: "cascade" }),
+  subject: varchar("subject", { length: 255 }).notNull(),
+  body: text("body").notNull(),
+  delayDays: int("delayDays").default(0).notNull(),
+  sortOrder: int("sortOrder").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => [index("email_sequence_steps_idx").on(table.sequenceId, table.sortOrder)]);
+
+export const supportTickets = mysqlTable("supportTickets", {
+  id: int("id").autoincrement().primaryKey(),
+  creatorId: int("creatorId").references(() => creators.id, { onDelete: "set null" }),
+  subject: varchar("subject", { length: 255 }).notNull(),
+  status: mysqlEnum("status", ["open", "in_progress", "resolved"]).default("open").notNull(),
+  priority: mysqlEnum("priority", ["low", "normal", "high"]).default("normal").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => [index("support_tickets_status_idx").on(table.status)]);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
-
-// TODO: Add your tables here

@@ -1,0 +1,35 @@
+# Project TODO
+
+- [x] Define the CreaDock domain model, product states, and core dashboard metrics.
+- [x] Add database schema and typed backend APIs for creator profiles, storefront blocks, products, files, courses, lessons, enrollments, bookings, memberships, customers, orders, and email campaigns.
+- [x] Superseded by in-app MVP checkout at the user’s direction; no live payment workflow is in scope.
+- [x] Build an elegant responsive creator dashboard shell with grouped navigation, account controls, and mobile navigation.
+- [x] Build the dashboard overview with revenue, MRR, customer, conversion, order, and store-view metrics; sales chart; recent orders; and quick actions.
+- [x] Build creator profile, appearance, and publishing management flows for the public storefront.
+- [x] Build digital-product management with secure file upload, file metadata, pricing, publish state, and product editor validation.
+- [x] Build course creation, lesson editing, enrollment tracking, and student progress management.
+- [x] Build service, availability, calendar, and booking-management workflows for one-to-one and group sessions.
+- [ ] Build membership-plan management, gated-content entitlement, active-subscriber visibility, and subscription status controls.
+- [ ] Build a unified customer CRM with contact details, tags, engagement state, and purchase history.
+- [ ] Build email audience, broadcast composition, welcome-sequence configuration, delivery records, and scheduled-send foundation.
+- [ ] Build the public mobile-first creator storefront with profile, bio, social links, product and course offers, booking, membership, and email-signup blocks.
+- [ ] Build a cart and checkout flow supporting one-time products and recurring membership plans.
+- [x] Build an admin panel with platform statistics, creator oversight, support queue, and moderation controls.
+- [ ] Add empty, loading, error, permission, and mobile-responsive states across all core workflows.
+- [x] Add unit tests for core business logic and API contract behavior.
+- [x] Verify the current interface visually on desktop, resolve presentation defects, and document external provider setup requirements.
+- [x] Add store-view aggregation to dashboard queries and display it alongside core metrics.
+- [x] Make appearance settings persistent and apply creator accent choices in the public storefront.
+- [x] Add product publish-state controls and edit workflows for digital-product metadata.
+- [x] Expand API-contract coverage for protected dashboard, administration, and public subscriber flows.
+- [x] Complete responsive visual QA across key workspace routes and document external provider activation requirements.
+- [x] Replace external-provider dependency prompts with clearly labeled in-app MVP checkout and order-completion behavior.
+- [x] Add public storefront purchase actions that create MVP orders, customer records, and delivery entitlements.
+- [x] Add in-app booking reservation, course lesson progress, and membership-join interactions for the MVP.
+- [x] Add MVP email-campaign send state and welcome-sequence execution previews without external delivery.
+- [x] Add tests and visual QA for the completed in-app MVP flows.
+- [x] Persist and surface MVP digital-delivery entitlements after purchase, including instant download access in the success state.
+- [x] Add success-path tests for MVP purchase, membership, booking, lesson-progress, and campaign-send flows.
+- [ ] Verify a populated published storefront and the checkout, booking, course, membership, and campaign success states visually.
+- [x] Add lesson editing, removal, ordering, and creator-facing enrollment progress management.
+- [x] Add creator appointment management with status controls and configurable group-session capacity.
