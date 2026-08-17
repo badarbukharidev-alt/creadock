@@ -42,6 +42,18 @@ function isSecureRequest(req: Request) {
   return typeof forwarded === "string" && forwarded.split(",").some((value) => value.trim() === "https");
 }
 
+export function sessionTokenFromRequest(req: Request) {
+  const parsed = req.cookies?.[CREADOCK_SESSION_COOKIE] as string | undefined;
+  if (parsed) return parsed;
+  const header = req.headers.cookie;
+  if (!header) return undefined;
+  return header
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${CREADOCK_SESSION_COOKIE}=`))
+    ?.slice(CREADOCK_SESSION_COOKIE.length + 1);
+}
+
 async function dbOrThrow() {
   const db = await getDb();
   if (!db) throw new Error("Database is unavailable");
@@ -76,7 +88,7 @@ export async function createUserSession(user: User, req: Request, res: Response,
 }
 
 export async function getFirstPartyUser(req: Request): Promise<User | null> {
-  const rawToken = req.cookies?.[CREADOCK_SESSION_COOKIE] as string | undefined;
+  const rawToken = sessionTokenFromRequest(req);
   if (!rawToken || !rawToken.includes(".")) return null;
   const [sessionId] = rawToken.split(".");
   if (!sessionId) return null;
@@ -168,7 +180,7 @@ export async function resetPassword(token: string, newPassword: string, req: Req
 }
 
 export async function logoutCurrent(req: Request, res: Response) {
-  const rawToken = req.cookies?.[CREADOCK_SESSION_COOKIE] as string | undefined;
+  const rawToken = sessionTokenFromRequest(req);
   const sessionId = rawToken?.split(".")[0];
   if (sessionId) { const db = await dbOrThrow(); await db.update(userSessions).set({ revokedAt: new Date() }).where(eq(userSessions.id, sessionId)); }
   res.clearCookie(CREADOCK_SESSION_COOKIE, { httpOnly: true, secure: isSecureRequest(req), sameSite: "lax", path: "/" });

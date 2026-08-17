@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isInitialAdminEmail, normalizeEmail, normalizeUsername, validatePassword } from "./auth";
+import { isInitialAdminEmail, normalizeEmail, normalizeUsername, sessionTokenFromRequest, validatePassword } from "./auth";
 import { emailTemplates } from "./email";
 import { smtpStatus } from "./email";
 import { stripeProvider, stripeStatus } from "./payments";
@@ -26,6 +26,10 @@ describe("first-party credential rules", () => {
   it("preserves a normalized email with plus addressing", () => expect(normalizeEmail("Creator+Store@Example.com")).toBe("creator+store@example.com"));
   it("preserves supported username separators", () => expect(normalizeUsername("store-name_01")).toBe("store-name_01"));
   it("does not grant initial administrator status to a different email address", () => expect(isInitialAdminEmail("another-admin@example.com")).toBe(false));
+  it("extracts a first-party session from a raw HTTP cookie header when Express cookie middleware is absent", () => {
+    const token = "session-id.session-secret";
+    expect(sessionTokenFromRequest({ cookies: undefined, headers: { cookie: `theme=light; creadock_session=${token}; locale=en` } } as never)).toBe(token);
+  });
 });
 
 describe("transactional templates", () => {
