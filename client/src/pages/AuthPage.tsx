@@ -13,11 +13,12 @@ function AuthShell({ children, title, subtitle }: { children: React.ReactNode; t
 
 export default function AuthPage() {
   const [location, setLocation] = useLocation();
+  const utils = trpc.useUtils();
   const query = new URLSearchParams(location.split("?")[1] || "");
   const token = query.get("token") || "";
   const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [username, setUsername] = useState(""); const [password, setPassword] = useState(""); const [confirmPassword, setConfirmPassword] = useState(""); const [remember, setRemember] = useState(true);
   const signUp = trpc.auth.signUp.useMutation({ onSuccess: () => { toast.success("Account created. Check your email to verify it."); setLocation("/login"); }, onError: (error) => toast.error(error.message) });
-  const login = trpc.auth.login.useMutation({ onSuccess: () => { toast.success("Welcome back"); setLocation("/app"); }, onError: (error) => toast.error(error.message) });
+  const login = trpc.auth.login.useMutation({ onSuccess: (result) => { utils.auth.me.setData(undefined, result.user); void utils.auth.me.invalidate(); toast.success("Welcome back"); setLocation("/app/dashboard"); }, onError: (error) => toast.error(error.message) });
   const requestReset = trpc.auth.requestPasswordReset.useMutation({ onSuccess: (result) => toast.success(result.message), onError: (error) => toast.error(error.message) });
   const reset = trpc.auth.resetPassword.useMutation({ onSuccess: () => { toast.success("Password updated. Please sign in."); setLocation("/login"); }, onError: (error) => toast.error(error.message) });
   const verify = trpc.auth.verifyEmail.useMutation({ onSuccess: () => { toast.success("Email verified. Your account is ready."); setLocation("/app"); }, onError: (error) => toast.error(error.message) });
